@@ -1,4 +1,5 @@
 import { readFile, writeFile } from 'node:fs/promises';
+import validateNpmPackageName from 'validate-npm-package-name';
 import { WorkspaceDiscoveryError } from './errors';
 import { isJsonObject, isStringRecord, stringifyJsonLike } from './json';
 
@@ -28,6 +29,11 @@ export async function readManifest(path: string): Promise<PackageManifest> {
   const { name, version } = parsed;
   if (typeof name !== 'string' || name.length === 0) {
     throw new WorkspaceDiscoveryError(`${path} has no "name". Every workspace package needs a name: releases are ordered, tagged, and matched to dependents by it.`);
+  }
+  // The name is spliced verbatim into a lodash template (semantic-release's `tagFormat`), so it must be restricted to npm's own package-name rules -- which exclude every lodash template delimiter -- before it ever reaches that template, not merely "non-empty".
+  const validity = validateNpmPackageName(name);
+  if (!validity.validForOldPackages) {
+    throw new WorkspaceDiscoveryError(`${path} has an invalid "name" ("${name}"): ${(validity.errors ?? []).join('; ')}`);
   }
   if (typeof version !== 'string' || version.length === 0) {
     throw new WorkspaceDiscoveryError(`${path} has no "version".`);
