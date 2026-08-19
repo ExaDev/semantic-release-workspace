@@ -4,6 +4,7 @@ import { analyzeCommits } from '@semantic-release/commit-analyzer';
 import { generateNotes } from '@semantic-release/release-notes-generator';
 import type { AnalyzeCommitsContext, Commit, GenerateNotesContext } from 'semantic-release';
 import { packageName } from './package-name';
+import { parseDependencyBumpTrailer } from './dependency-bump-commit';
 import { ReleaseConfigurationError } from './errors';
 import { changedPathsSince } from './git';
 import type { WorkspacePackage } from './workspace';
@@ -54,7 +55,7 @@ export interface ScopedPlugins {
  *
  * Both apply the same path scoping before delegating to the real @semantic-release/commit-analyzer and @semantic-release/release-notes-generator: the commit list semantic-release already fetched for the release range is filtered down to commits whose `git log --name-only` file list intersects the package's own directory, and only the filtered list reaches the standard plugin. Conventional-commit parsing and changelog formatting stay entirely inside the standard plugins.
  *
- * The `analyzeCommits` wrapper carries one addition beyond filtering: when the standard analyzer finds no releasable commits but this run has already changed one of the package's workspace dependency ranges, it returns 'patch' anyway. A dependent whose only change is a dependency bump still needs a release for that range to reach the registry -- see the orchestrator for the sequencing that makes the bump visible here.
+ * The `analyzeCommits` wrapper carries one addition beyond filtering: when the standard analyzer finds no releasable commits but a workspace dependency range of the package's has changed, it returns 'patch' anyway. A dependent whose only change is a dependency bump still needs a release for that range to reach the registry. "Has changed" is read from two sources, merged: bumps recorded in memory earlier in the current run (`scope.bumps`), and bumps recorded in the package's own filtered commit history via the trailer `dependency-bump-commit.ts` writes and reads -- the latter is what lets a run that starts after a previous run already committed and pushed the bump (a crash recovery, or simply a later run) reach the same decision, rather than depending on state that existed only inside the process that made the commit.
  */
 export function createScopedPlugins(scope: {
   readonly pkg: WorkspacePackage;
@@ -81,12 +82,12 @@ export function createScopedPlugins(scope: {
       if (type) {
         return type;
       }
-      const bumps = scope.bumps.bumpsFor(scope.pkg.name);
+      const bumps = mergeDependencyBumps(scope.bumps.bumpsFor(scope.pkg.name), commits);
       if (bumps.length === 0) {
         return false;
       }
       context.logger.log(
-        `No releasable commits under ${scope.pkg.relativeDirectory}, but ${bumps.length === 1 ? 'a workspace dependency range changed' : `${bumps.length} workspace dependency ranges changed`} in this run; forcing a patch release.`,
+        `No releasable commits under ${scope.pkg.relativeDirectory}, but ${bumps.length === 1 ? 'a workspace dependency range changed' : `${bumps.length} workspace dependency ranges changed`}; forcing a patch release.`,
       );
       return 'patch';
     },
@@ -94,7 +95,7 @@ export function createScopedPlugins(scope: {
     async generateNotes(_pluginConfig, context) {
       const commits = await commitsForPackage(context);
       const notes = await generateNotes(scope.generateNotesConfig, { ...context, commits });
-      const bumps = scope.bumps.bumpsFor(scope.pkg.name);
+      const bumps = mergeDependencyBumps(scope.bumps.bumpsFor(scope.pkg.name), commits);
       if (bumps.length === 0) {
         return notes;
       }
@@ -102,6 +103,23 @@ export function createScopedPlugins(scope: {
       return notes ? `${notes}\n\n${section}` : section;
     },
   };
+}
+
+/**
+ * Combines the bumps recorded in memory earlier in the current run with bumps recovered from the package's own filtered commit history (a bump commit from this run, already visible because it touches the package's own directory, or one left over from a previous run), de-duplicated by dependency name. The in-memory entry wins on overlap: it carries the manifest field and dependent name a `resolved-at-publish` bump has no commit to recover from at all.
+ */
+function mergeDependencyBumps(runtimeBumps: readonly DependencyBump[], commits: readonly Commit[]): readonly DependencyBump[] {
+  const byDependency = new Map<string, DependencyBump>();
+  for (const commit of commits) {
+    const parsed = parseDependencyBumpTrailer(commit.message);
+    if (parsed !== undefined) {
+      byDependency.set(parsed.dependency, { ...parsed, kind: 'rewritten' });
+    }
+  }
+  for (const bump of runtimeBumps) {
+    byDependency.set(bump.dependency, bump);
+  }
+  return [...byDependency.values()];
 }
 
 function describeDependencyBump(bump: DependencyBump): string {
