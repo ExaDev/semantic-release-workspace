@@ -77,7 +77,9 @@
   "license": "MIT",
   "packageManager": "pnpm@11.6.0",
   "dependencies": {
-    "commander": "^15.0.0"
+    "commander": "^15.0.0",
+    "tinyglobby": "^0.2.17",
+    "yaml": "^2.9.0"
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "^0.18.5",
@@ -86,8 +88,13 @@
     "@eslint/js": "^10.0.1",
     "@exadev/eslint-config": "^2.1.1",
     "@semantic-release/changelog": "^7.0.0",
+    "@semantic-release/commit-analyzer": "^13.0.1",
     "@semantic-release/git": "^11.0.1",
+    "@semantic-release/github": "^12.0.9",
+    "@semantic-release/npm": "^13.1.5",
+    "@semantic-release/release-notes-generator": "^14.1.1",
     "@types/node": "^26.2.0",
+    "@types/signale": "^1.4.7",
     "@vitest/coverage-v8": "^4.1.11",
     "eslint": "^10.8.1",
     "globals": "^17.11.0",
@@ -95,10 +102,20 @@
     "lint-staged": "^17.3.0",
     "publint": "^0.3.23",
     "semantic-release": "^25.0.9",
+    "signale": "^1.4.0",
     "tsdown": "^0.22.14",
     "turbo": "^2.10.11",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.67.0",
     "vitest": "^4.1.11"
+  },
+  "peerDependencies": {
+    "@semantic-release/changelog": "^7.0.0",
+    "@semantic-release/commit-analyzer": "^13.0.1",
+    "@semantic-release/git": "^11.0.1",
+    "@semantic-release/github": "^12.0.9",
+    "@semantic-release/npm": "^13.1.5",
+    "@semantic-release/release-notes-generator": "^14.1.1",
+    "semantic-release": "^25.0.9"
   }
 }
