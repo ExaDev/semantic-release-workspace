@@ -1,0 +1,19 @@
+# 1.0.0 (2026-08-19)
+
+
+### Bug Fixes
+
+* raise a workspace-state error for a detached HEAD, not a git command error ([12c7e89](https://github.com/ExaDev/semantic-release-workspace/commit/12c7e898a7aa401438ed17d6c2940aba048c7db0))
+* recover the forced-patch decision from history, not only in-memory state ([29a22c5](https://github.com/ExaDev/semantic-release-workspace/commit/29a22c542a5bf48c43667563da0d4507d39317b7))
+* reject package names that would inject a template into semantic-release's tagFormat ([5b0ed80](https://github.com/ExaDev/semantic-release-workspace/commit/5b0ed80f68445609c15c2ac41a81c7571a470ba0))
+* scope path-filtered commit analysis to the git repository toplevel ([9d76cec](https://github.com/ExaDev/semantic-release-workspace/commit/9d76cecc437f6892cfbdca0b1c3574e260d044dd))
+* stop git C-quoting non-ASCII commit paths from breaking path scoping ([ed2348a](https://github.com/ExaDev/semantic-release-workspace/commit/ed2348a2582504227d593778f665cdd1d1d3ec83))
+* validate every dependency range shape before any package releases ([6548dcf](https://github.com/ExaDev/semantic-release-workspace/commit/6548dcf34a421ff6a6bbe27e669336ee52d8a414))
+
+
+### Features
+
+* discover pnpm workspace packages and build their dependency graph ([e4727aa](https://github.com/ExaDev/semantic-release-workspace/commit/e4727aab432cec9bacaf3514bfd3eb11fd82b1d6))
+* expose the orchestrator through the CLI and public API ([66faf08](https://github.com/ExaDev/semantic-release-workspace/commit/66faf08d4cea83ffcfcfca9831b4367fd86f03c1))
+* orchestrate per-package releases with cross-package manifest bumping ([ce80c09](https://github.com/ExaDev/semantic-release-workspace/commit/ce80c0909d3b059aff579981590dbb26e61202cc))
+* scope semantic-release analysis to a package's own commits ([12db69d](https://github.com/ExaDev/semantic-release-workspace/commit/12db69d89c725364542343fe6fd386b4f192bf39))
