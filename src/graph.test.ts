@@ -9,6 +9,7 @@ function packageFixture(name: string, dependencies: Readonly<Record<string, stri
     version: '1.0.0',
     directory: `/work/packages/${name}`,
     relativeDirectory: `packages/${name}`,
+    repoRelativeDirectory: `packages/${name}`,
     manifestPath: `/work/packages/${name}/package.json`,
     dependencies: new Map([['dependencies', new Map(Object.entries(dependencies))]]),
   };

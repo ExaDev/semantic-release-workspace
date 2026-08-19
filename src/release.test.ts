@@ -217,6 +217,27 @@ describe('releaseWorkspace against a real git workspace', () => {
       await fixture.remove();
     }
   }, 240_000);
+
+  it('releases every package correctly when the workspace is nested below the git repository toplevel', async () => {
+    const fixture = await createWorkspaceFixture(
+      [
+        { name: '@fixture/a', version: '1.0.0' },
+        { name: '@fixture/b', version: '1.0.0', dependencies: { '@fixture/a': '^1.0.0' } },
+      ],
+      [{ message: 'feat(a): second feature', files: { 'packages/a/src/index.js': 'export const a = 2;\n' } }],
+      { workspaceSubdirectory: 'monorepo' },
+    );
+    try {
+      const outcome = await releaseWorkspace({ root: fixture.root, env: releaseEnv(), plugins: FIXTURE_PLUGINS });
+
+      // Before the git-toplevel fix, `relativeDirectory` (workspace-root-relative) was compared against `git log` output (repository-root-relative), which never matched once the workspace sat below the repository root -- every package silently released nothing.
+      const byName = new Map(outcome.packages.map((pkg) => [pkg.name, pkg]));
+      expect(byName.get('@fixture/a')).toMatchObject({ released: true, version: '1.1.0', type: 'minor' });
+      expect(byName.get('@fixture/b')).toMatchObject({ released: true, version: '1.0.1', type: 'patch' });
+    } finally {
+      await fixture.remove();
+    }
+  }, 240_000);
 });
 
 async function readManifest(root: string, packageName: string): Promise<Record<string, unknown>> {

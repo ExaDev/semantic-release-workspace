@@ -3,6 +3,7 @@ import { dirname, relative, resolve, sep } from 'node:path';
 import { glob } from 'tinyglobby';
 import { parse as parseYaml } from 'yaml';
 import { WorkspaceDiscoveryError } from './errors';
+import { git } from './git';
 import { isJsonObject, isStringArray } from './json';
 import { type DependencyField, readManifest } from './manifest';
 
@@ -17,8 +18,10 @@ export interface WorkspacePackage {
   readonly version: string;
   /** Absolute path to the package directory. */
   readonly directory: string;
-  /** Path relative to the workspace root, always POSIX-separated, because it is compared against the paths `git log` reports. */
+  /** Path relative to the workspace root, always POSIX-separated. Used for filesystem and git-pathspec purposes scoped to the workspace itself (for example `git add` run with the workspace root as `cwd`) -- never for matching against `git log` output, which `git` always reports relative to the repository's toplevel, not to whatever `cwd` a command happened to run from. Compare `repoRelativeDirectory` for that. */
   readonly relativeDirectory: string;
+  /** Path relative to the git repository's toplevel, always POSIX-separated. This is the base every `git log --name-only` path is compared against, because git reports changed paths relative to the repository root regardless of the directory a command runs from -- equal to `relativeDirectory` only when `pnpm-workspace.yaml` itself sits at the repository's toplevel. */
+  readonly repoRelativeDirectory: string;
   readonly manifestPath: string;
   readonly dependencies: ReadonlyMap<DependencyField, ReadonlyMap<string, string>>;
 }
@@ -38,6 +41,7 @@ export interface Workspace {
 export async function discoverWorkspace(root: string): Promise<Workspace> {
   const workspaceRoot = resolve(root);
   const patterns = await readWorkspacePatterns(workspaceRoot);
+  const repoPrefix = await resolveRepoPrefix(workspaceRoot);
 
   const positive = patterns.filter((pattern) => !pattern.startsWith('!'));
   const negative = patterns.filter((pattern) => pattern.startsWith('!')).map((pattern) => pattern.slice(1));
@@ -59,6 +63,8 @@ export async function discoverWorkspace(root: string): Promise<Workspace> {
     if (relativeDirectory === '') {
       throw new WorkspaceDiscoveryError(`${WORKSPACE_MANIFEST} matches the workspace root itself. A package at the root cannot be scoped to its own commits, because every commit in the repository touches it; move it into a subdirectory or exclude it from the "packages" globs.`);
     }
+    // Composed from two purely relative, syntactically consistent fragments (`repoPrefix` and `relativeDirectory`) rather than diffed from two absolute paths: an absolute git toplevel (which git reports with symlinks resolved) and `directory` (which is not, since it comes from a glob rooted at whatever form `workspaceRoot` was passed in) can disagree in symlinked form on a path that is nonetheless the same directory -- for example a workspace under macOS's /tmp, which is itself a symlink to /private/tmp -- and naively diffing them would silently produce a nonsense relative path instead of erroring, which is worse than the bug this exists to fix.
+    const repoRelativeDirectory = repoPrefix === '' ? relativeDirectory : `${repoPrefix}${relativeDirectory}`;
 
     const manifest = await readManifest(manifestPath);
     const existing = byName.get(manifest.name);
@@ -72,6 +78,7 @@ export async function discoverWorkspace(root: string): Promise<Workspace> {
       version: manifest.version,
       directory,
       relativeDirectory,
+      repoRelativeDirectory,
       manifestPath,
       dependencies: manifest.dependencies,
     });
@@ -82,6 +89,16 @@ export async function discoverWorkspace(root: string): Promise<Workspace> {
   }
 
   return { root: workspaceRoot, packages };
+}
+
+/**
+ * Resolves the workspace root's own path relative to the git repository's toplevel, via `git rev-parse --show-prefix` -- for example `''` when `pnpm-workspace.yaml` sits at the repository root, or `'monorepo/'` (always POSIX, always either empty or trailing-slash-terminated, per git's own contract for this flag) when the workspace is nested a level below it. `git log --name-only` always reports changed paths relative to the repository's toplevel regardless of the `cwd` a command runs from, so path-scoped commit filtering has to compare against paths built on this prefix, not against paths relative to `pnpm-workspace.yaml`'s own directory alone -- the two differ whenever the workspace is not itself the git toplevel, and comparing against the wrong base makes every path comparison fail silently (see `repoRelativeDirectory`).
+ */
+async function resolveRepoPrefix(workspaceRoot: string): Promise<string> {
+  const output = await git(['rev-parse', '--show-prefix'], { cwd: workspaceRoot }).catch((cause: unknown) => {
+    throw new WorkspaceDiscoveryError(`Cannot resolve the git repository toplevel for ${workspaceRoot}: ${cause instanceof Error ? cause.message : String(cause)}. The workspace must sit inside a git repository, because commit analysis is scoped to each package's directory relative to the repository root.`);
+  });
+  return output.trim();
 }
 
 async function readWorkspacePatterns(workspaceRoot: string): Promise<string[]> {

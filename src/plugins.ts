@@ -71,7 +71,7 @@ export function createScopedPlugins(scope: {
     if (cached?.from !== from) {
       cached = { from, paths: changedPathsSince(from, { cwd: context.cwd }) };
     }
-    return filterCommitsToDirectory(context.commits, await cached.paths, scope.pkg.relativeDirectory);
+    return filterCommitsToDirectory(context.commits, await cached.paths, scope.pkg.repoRelativeDirectory);
   }
 
   return {

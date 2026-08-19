@@ -28,13 +28,23 @@ export interface WorkspaceFixture {
   readonly remove: () => Promise<void>;
 }
 
-export async function createWorkspaceFixture(packages: readonly FixturePackage[], commits: readonly FixtureCommit[]): Promise<WorkspaceFixture> {
+export interface WorkspaceFixtureOptions {
+  /** Path, relative to the git repository's toplevel, where `pnpm-workspace.yaml` and the packages live. Defaults to the repository toplevel itself. Set this to reproduce a workspace that is not itself the git toplevel -- e.g. a monorepo checked out with the pnpm workspace one level below the repository root. */
+  readonly workspaceSubdirectory?: string;
+}
+
+export async function createWorkspaceFixture(
+  packages: readonly FixturePackage[],
+  commits: readonly FixtureCommit[],
+  options: WorkspaceFixtureOptions = {},
+): Promise<WorkspaceFixture> {
   const directory = await mkdtemp(join(tmpdir(), 'semantic-release-workspace-'));
-  const root = join(directory, 'workspace');
+  const gitRoot = join(directory, 'workspace');
+  const root = options.workspaceSubdirectory === undefined ? gitRoot : join(gitRoot, options.workspaceSubdirectory);
   const remote = join(directory, 'remote.git');
 
-  await mkdir(root);
-  await git(['init', '--initial-branch=main', root], { cwd: directory });
+  await mkdir(root, { recursive: true });
+  await git(['init', '--initial-branch=main', gitRoot], { cwd: directory });
   await git(['init', '--bare', '--initial-branch=main', remote], { cwd: directory });
   await git(['config', 'user.name', 'Fixture Release Bot'], { cwd: root });
   await git(['config', 'user.email', 'fixture@example.com'], { cwd: root });
