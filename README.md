@@ -72,7 +72,7 @@ Out of scope, on purpose: parallelising independent branches of the dependency g
 Install once at the workspace root (the six standard plugins are peer dependencies and must be installed alongside):
 
 ```sh
-pnpm add -D semantic-release-workspace semantic-release @semantic-release/commit-analyzer @semantic-release/release-notes-generator @semantic-release/changelog @semantic-release/npm @semantic-release/github @semantic-release/git
+pnpm add -D @exadev/semantic-release-workspace semantic-release @semantic-release/commit-analyzer @semantic-release/release-notes-generator @semantic-release/changelog @semantic-release/npm @semantic-release/github @semantic-release/git
 ```
 
 Then one step replaces the per-repo release job. In GitHub Actions (this package's own OIDC trusted-publishing pattern carries over unchanged — publishing credentials stay between semantic-release's plugins and the registry):
