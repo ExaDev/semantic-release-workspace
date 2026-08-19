@@ -1,0 +1,104 @@
+{
+  "name": "@exadev/semantic-release-workspace",
+  "version": "0.0.0-development",
+  "description": "Independent per-package semantic-release orchestration for pnpm workspaces, without lockstep versioning.",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ExaDev/semantic-release-workspace.git"
+  },
+  "homepage": "https://github.com/ExaDev/semantic-release-workspace#readme",
+  "bugs": {
+    "url": "https://github.com/ExaDev/semantic-release-workspace/issues"
+  },
+  "bin": {
+    "semantic-release-workspace": "./dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": {
+        "import": "./dist/index.d.ts",
+        "require": "./dist/index.d.cts"
+      },
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./*": {
+      "types": {
+        "import": "./dist/*.d.ts",
+        "require": "./dist/*.d.cts"
+      },
+      "import": "./dist/*.js",
+      "require": "./dist/*.cjs"
+    }
+  },
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true,
+    "registry": "https://registry.npmjs.org/"
+  },
+  "sideEffects": false,
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "turbo run _build",
+    "_build": "tsdown",
+    "prepublishOnly": "pnpm run lint && pnpm run typecheck && tsdown && publint && attw --pack",
+    "lint": "turbo run _lint",
+    "_lint": "eslint . --fix --cache --max-warnings 0",
+    "typecheck": "turbo run _typecheck",
+    "_typecheck": "tsc --noEmit",
+    "test": "turbo run _test",
+    "_test": "vitest run --project unit",
+    "test:watch": "vitest --project unit",
+    "test:coverage": "turbo run _test:coverage",
+    "_test:coverage": "vitest run --project unit --coverage",
+    "test:smoke": "turbo run _test:smoke",
+    "_test:smoke": "tsdown && vitest run --project smoke",
+    "prepare": "husky",
+    "release": "semantic-release"
+  },
+  "keywords": [
+    "semantic-release",
+    "pnpm",
+    "workspace",
+    "monorepo",
+    "release",
+    "versioning",
+    "ci"
+  ],
+  "license": "MIT",
+  "packageManager": "pnpm@11.6.0",
+  "dependencies": {
+    "commander": "^15.0.0"
+  },
+  "devDependencies": {
+    "@arethetypeswrong/cli": "^0.18.5",
+    "@commitlint/cli": "^21.2.2",
+    "@commitlint/config-conventional": "^21.2.2",
+    "@eslint/js": "^10.0.1",
+    "@exadev/eslint-config": "^2.1.1",
+    "@semantic-release/changelog": "^7.0.0",
+    "@semantic-release/git": "^11.0.1",
+    "@types/node": "^26.2.0",
+    "@vitest/coverage-v8": "^4.1.11",
+    "eslint": "^10.8.1",
+    "globals": "^17.11.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^17.3.0",
+    "publint": "^0.3.23",
+    "semantic-release": "^25.0.9",
+    "tsdown": "^0.22.14",
+    "turbo": "^2.10.11",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.67.0",
+    "vitest": "^4.1.11"
+  }
+}

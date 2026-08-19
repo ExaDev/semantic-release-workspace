@@ -1,0 +1,5 @@
+# esbuild (vitest/vite's dependency pre-bundler) ships a native binary installed via a postinstall script -- pnpm ignores those by default, so allow it explicitly.
+allowBuilds:
+  esbuild: true
+# Set low enough that a same-day devDependency release never blocks CI, matching this family's existing pnpm-workspace.yaml precedent (see e.g. document-schema.js). This package has no ExaDev sibling dependency of its own yet, so there is no minimumReleaseAgeExclude list -- add one here if a future dependency on another ExaDev-published package needs it.
+minimumReleaseAge: 60
