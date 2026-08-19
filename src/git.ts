@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { GitCommandError } from './errors';
+import { GitCommandError, WorkspaceStateError } from './errors';
 
 const execFileAsync = promisify(execFile);
 
@@ -59,11 +59,11 @@ export function parseChangedPaths(output: string): Map<string, ReadonlySet<strin
   return changedPaths;
 }
 
-/** The branch a dependency-bump commit will be pushed to. Refuses a detached HEAD by name rather than pushing `HEAD:HEAD` to the remote and watching it fail somewhere less legible. */
+/** The branch a dependency-bump commit will be pushed to. Refuses a detached HEAD by name rather than pushing `HEAD:HEAD` to the remote and watching it fail somewhere less legible. A detached HEAD is a WorkspaceStateError rather than a GitCommandError because the git command itself succeeded: the repository's state is what cannot support the release, and conflating the two would report a working command as a failed one. */
 export async function currentBranch(options: GitCommandOptions): Promise<string> {
   const branch = (await git(['rev-parse', '--abbrev-ref', 'HEAD'], options)).trim();
   if (branch === 'HEAD') {
-    throw new GitCommandError(['rev-parse', '--abbrev-ref', 'HEAD'], options.cwd, undefined, 'HEAD is detached; there is no branch name to push dependency-bump commits to. Run the release from a branch checkout.');
+    throw new WorkspaceStateError(`HEAD is detached in ${options.cwd}; there is no branch name to push dependency-bump commits to. Run the release from a branch checkout.`);
   }
   return branch;
 }
