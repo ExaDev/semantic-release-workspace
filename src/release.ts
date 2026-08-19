@@ -1,6 +1,7 @@
 import { resolve } from 'node:path';
 import semanticRelease from 'semantic-release';
 import type { BranchSpec, Options, Result } from 'semantic-release';
+import { formatDependencyBumpMessage } from './dependency-bump-commit';
 import { WorkspaceReleaseError } from './errors';
 import { commitFiles, pushHead, resolveCommitIdentity, type CommitIdentity } from './git';
 import { buildDependencyGraph, topologicalOrder, type DependencyGraph } from './graph';
@@ -198,8 +199,8 @@ async function bumpDependents(released: WorkspacePackage, version: string, graph
     if (update.kind === 'rewritten') {
       if (!options.dryRun) {
         await writeDependencyRange(dependent.manifestPath, edge.field, released.name, update.range);
-        // The commit's message carries [skip ci] for the same reason semantic-release's own release commits do: pushing it must not trigger another CI release run that would race this one.
-        const message = `chore(deps): bump ${released.name} to ${update.range} in ${edge.dependent} [skip ci]`;
+        // The commit's message carries [skip ci] for the same reason semantic-release's own release commits do: pushing it must not trigger another CI release run that would race this one. It also carries a machine-parseable trailer (see dependency-bump-commit.ts) so a run that starts after this commit already exists in history -- including one recovering from a crash right after this push -- still recognises it as a dependency bump, rather than only a run that made the commit itself in memory recognising it.
+        const message = formatDependencyBumpMessage({ dependency: released.name, version, range: update.range, dependent: edge.dependent });
         await commitFiles([`${dependent.relativeDirectory}/package.json`], message, { cwd: options.workspace.root, identity: options.identity });
         await pushHead({ cwd: options.workspace.root });
         options.log(`Bumped ${released.name} to ${update.range} in ${edge.dependent}, committed and pushed`);

@@ -1,10 +1,12 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { formatDependencyBumpMessage } from './dependency-bump-commit';
 import { DependencyCycleError } from './errors';
 import { git } from './git';
 import { type FixturePackage, createWorkspaceFixture } from './git-workspace-fixture';
 import { isJsonObject } from './json';
+import { writeDependencyRange } from './manifest';
 import { type PublishPluginSpec } from './plugins';
 import { releaseWorkspace } from './release';
 
@@ -262,6 +264,41 @@ describe('releaseWorkspace against a real git workspace', () => {
       await fixture.remove();
     }
   }, 240_000);
+
+  it('recovers the forced-patch decision from a bump commit already in history, as if a previous run stopped between the dependency release and the dependent turn', async () => {
+    const fixture = await createWorkspaceFixture(
+      [
+        { name: '@fixture/a', version: '1.0.0' },
+        { name: '@fixture/b', version: '1.0.0', dependencies: { '@fixture/a': '^1.0.0' } },
+      ],
+      [{ message: 'feat(a): second feature', files: { 'packages/a/src/index.js': 'export const a = 2;\n' } }],
+    );
+    try {
+      // Reproduce exactly the state a crash between `a`'s release and `b`'s turn leaves: `a` already released, tagged, with its version written through...
+      await writeManifestVersion(fixture.root, '@fixture/a', '1.1.0');
+      await git(['add', '--', 'packages/a/package.json'], { cwd: fixture.root });
+      await git(['commit', '-m', 'chore(release): @fixture/a@1.1.0 [skip ci]'], { cwd: fixture.root });
+      await git(['tag', '@fixture/a@1.1.0'], { cwd: fixture.root });
+
+      // ...and `b`'s manifest already bumped, committed, and pushed -- the exact commit `bumpDependents` makes -- with no in-memory record of it anywhere, because this is a brand-new process that never ran the first half of this release.
+      await writeDependencyRange(join(fixture.root, 'packages/b/package.json'), 'dependencies', '@fixture/a', '^1.1.0');
+      const message = formatDependencyBumpMessage({ dependency: '@fixture/a', version: '1.1.0', range: '^1.1.0', dependent: '@fixture/b' });
+      await git(['add', '--', 'packages/b/package.json'], { cwd: fixture.root });
+      await git(['commit', '-m', message], { cwd: fixture.root });
+      await git(['push', 'origin', 'main', '--tags'], { cwd: fixture.root });
+
+      const outcome = await releaseWorkspace({ root: fixture.root, env: releaseEnv(), plugins: FIXTURE_PLUGINS });
+
+      const byName = new Map(outcome.packages.map((pkg) => [pkg.name, pkg]));
+      // `a` has no releasable commits after the tag this test placed manually -- it must not release again.
+      expect(byName.get('@fixture/a')).toMatchObject({ released: false });
+      // `b` has no commit of its own beyond the bump commit, which the standard analyzer alone releases nothing for; recovering the bump from history is the only way this releases at all.
+      expect(byName.get('@fixture/b')).toMatchObject({ released: true, version: '1.0.1', type: 'patch' });
+      await expect(manifestVersion(fixture.root, '@fixture/b')).resolves.toBe('1.0.1');
+    } finally {
+      await fixture.remove();
+    }
+  }, 240_000);
 });
 
 async function readManifest(root: string, packageName: string): Promise<Record<string, unknown>> {
@@ -288,4 +325,11 @@ async function manifestDependency(root: string, packageName: string, dependency:
     throw new Error(`Fixture manifest for ${packageName} has no string dependency on ${dependency}.`);
   }
   return dependencies[dependency];
+}
+
+/** Rewrites a fixture package's own version on disk, for tests that need to hand-construct a git history state (a prior release already tagged) rather than have `releaseWorkspace` produce it. */
+async function writeManifestVersion(root: string, packageName: string, version: string): Promise<void> {
+  const path = join(root, 'packages', packageName.slice(packageName.indexOf('/') + 1), 'package.json');
+  const manifest = await readManifest(root, packageName);
+  await writeFile(path, `${JSON.stringify({ ...manifest, version }, null, 2)}\n`, 'utf8');
 }
