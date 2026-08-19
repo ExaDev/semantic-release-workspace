@@ -38,7 +38,8 @@ export interface CommitIdentity {
  */
 export async function changedPathsSince(from: string | undefined, options: GitCommandOptions): Promise<Map<string, ReadonlySet<string>>> {
   const range = from === undefined ? 'HEAD' : `${from}..HEAD`;
-  const output = await git(['log', '--name-only', '--no-renames', `--format=${COMMIT_RECORD_SEPARATOR}%H`, range], options);
+  // Without this, git C-quotes any path containing a non-ASCII byte (`"packages/caf\303\251/src/index.js"`), which would never match a package's plain-text directory prefix and would silently drop that package from every release -- the same silent-no-release failure mode path scoping exists to avoid.
+  const output = await git(['-c', 'core.quotePath=false', 'log', '--name-only', '--no-renames', `--format=${COMMIT_RECORD_SEPARATOR}%H`, range], options);
   return parseChangedPaths(output);
 }
 

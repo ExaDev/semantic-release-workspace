@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { GitCommandError, WorkspaceStateError } from './errors';
-import { currentBranch, git, pushHead, resolveCommitIdentity } from './git';
+import { changedPathsSince, currentBranch, git, pushHead, resolveCommitIdentity } from './git';
 import { createWorkspaceFixture } from './git-workspace-fixture';
 
 /** One package is enough for every git-level behaviour here: these tests are about the repository, not about the workspace's shape. */
@@ -53,6 +53,23 @@ describe('resolveCommitIdentity', () => {
         name: 'Fixture Release Bot',
         email: 'fixture@example.com',
       });
+    } finally {
+      await fixture.remove();
+    }
+  });
+});
+
+describe('changedPathsSince', () => {
+  it('reports a path containing a non-ASCII character verbatim, not git-C-quoted', async () => {
+    const fixture = await createWorkspaceFixture(
+      [{ name: '@fixture/cafe', version: '1.0.0', directory: 'café' }],
+      [{ message: 'feat(cafe): second feature', files: { 'packages/café/src/index.js': 'export const cafe = 2;\n' } }],
+    );
+    try {
+      const paths = await changedPathsSince(undefined, { cwd: fixture.root });
+      const everyPath = new Set([...paths.values()].flatMap((set) => [...set]));
+      // Without core.quotePath=false, git would report this as the C-escaped `"packages/caf\303\251/src/index.js"`, which no plain-text directory prefix would ever match.
+      expect(everyPath).toContain('packages/café/src/index.js');
     } finally {
       await fixture.remove();
     }

@@ -12,6 +12,8 @@ export interface FixturePackage {
   readonly name: string;
   readonly version: string;
   readonly dependencies?: Readonly<Record<string, string>>;
+  /** Directory name under `packages/`, when it needs to differ from the package name's own unscoped form -- for example a real npm name paired with a directory that has a space or a non-ASCII character in it, which a valid npm name can never contain itself. Defaults to the unscoped package name. */
+  readonly directory?: string;
 }
 
 export interface FixtureCommit {
@@ -55,7 +57,7 @@ export async function createWorkspaceFixture(
   await commit(root, 'chore: scaffold workspace', ['pnpm-workspace.yaml']);
 
   for (const pkg of packages) {
-    const directoryName = unscopedName(pkg.name);
+    const directoryName = pkg.directory ?? unscopedName(pkg.name);
     await mkdir(join(root, 'packages', directoryName, 'src'), { recursive: true });
     await writeFile(
       join(root, 'packages', directoryName, 'package.json'),
