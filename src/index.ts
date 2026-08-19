@@ -8,7 +8,7 @@ export { packageName } from './package-name';
 
 export { discoverWorkspace, type Workspace, type WorkspacePackage } from './workspace';
 export { buildDependencyGraph, topologicalOrder, type DependencyGraph, type WorkspaceDependency } from './graph';
-export { updateDependencyRange, type DependencyRangeUpdate } from './version-range';
+export { classifyDependencyRange, updateDependencyRange, type DependencyRangeShape, type DependencyRangeUpdate } from './version-range';
 export { readManifest, writeDependencyRange, type DependencyField, type PackageManifest } from './manifest';
 
 export {

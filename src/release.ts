@@ -15,7 +15,7 @@ import {
   createScopedPlugins,
 } from './plugins';
 import { type DependencyField, writeDependencyRange } from './manifest';
-import { updateDependencyRange } from './version-range';
+import { classifyDependencyRange, updateDependencyRange } from './version-range';
 import { discoverWorkspace, type Workspace, type WorkspacePackage } from './workspace';
 
 export interface ReleaseWorkspaceOptions {
@@ -74,6 +74,7 @@ export async function releaseWorkspace(options: ReleaseWorkspaceOptions = {}): P
 
   const workspace = await discoverWorkspace(root);
   const graph = buildDependencyGraph(workspace.packages);
+  validateDependencyRangeShapes(graph);
   const order = topologicalOrder(graph);
   log(`${packageName}: ${order.length} packages in release order: ${order.join(' -> ')}`);
 
@@ -129,6 +130,17 @@ export async function releaseWorkspace(options: ReleaseWorkspaceOptions = {}): P
   }
 
   return { order, packages: outcomes };
+}
+
+/**
+ * Checks every workspace dependency edge's range shape before anything releases, so an `UnsupportedDependencyRangeError` stops the run before the first publish rather than after some sibling has already been published, tagged, committed, and pushed. The shape a range supports depends only on the range text itself (see `classifyDependencyRange`), never on which version a sibling ends up releasing, so this can run once up front for the whole graph instead of only being discovered edge by edge as each dependency happens to release.
+ */
+function validateDependencyRangeShapes(graph: DependencyGraph): void {
+  for (const edges of graph.dependencies.values()) {
+    for (const edge of edges) {
+      classifyDependencyRange(edge.range);
+    }
+  }
 }
 
 async function runPackageRelease(pkg: WorkspacePackage, options: {
