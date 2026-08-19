@@ -157,6 +157,51 @@ describe('releaseWorkspace against a real git workspace', () => {
     }
   }, 60_000);
 
+  it('cascades through workspace: ranges pnpm resolves at publish time, releasing dependents without editing or committing their manifests', async () => {
+    const fixture = await createWorkspaceFixture(
+      [
+        { name: '@fixture/a', version: '1.0.0' },
+        { name: '@fixture/b', version: '1.0.0', dependencies: { '@fixture/a': 'workspace:^' } },
+        { name: '@fixture/c', version: '1.0.0', dependencies: { '@fixture/b': 'workspace:^' } },
+      ],
+      [{ message: 'feat(a): second feature', files: { 'packages/a/src/index.js': 'export const a = 2;\n' } }],
+    );
+    try {
+      const outcome = await releaseWorkspace({ root: fixture.root, env: releaseEnv(), plugins: FIXTURE_PLUGINS });
+
+      const byName = new Map(outcome.packages.map((pkg) => [pkg.name, pkg]));
+      expect(byName.get('@fixture/a')).toMatchObject({ released: true, version: '1.1.0', type: 'minor' });
+      // The whole point of the resolved-at-publish kind: no manifest edit happens, so nothing in b's own directory changed, and the release is driven purely by the recorded bump -- the published range still changes because pnpm substitutes it at pack time.
+      expect(byName.get('@fixture/b')).toMatchObject({
+        released: true,
+        version: '1.0.1',
+        type: 'patch',
+        dependencyBumps: [
+          { dependent: '@fixture/b', dependency: '@fixture/a', version: '1.1.0', range: 'workspace:^', kind: 'resolved-at-publish' },
+        ],
+      });
+      expect(byName.get('@fixture/c')).toMatchObject({
+        released: true,
+        version: '1.0.1',
+        type: 'patch',
+        dependencyBumps: [
+          { dependent: '@fixture/c', dependency: '@fixture/b', version: '1.0.1', range: 'workspace:^', kind: 'resolved-at-publish' },
+        ],
+      });
+
+      // The ranges are left exactly as written, while the released versions are still written through.
+      await expect(manifestDependency(fixture.root, '@fixture/b', '@fixture/a')).resolves.toBe('workspace:^');
+      await expect(manifestDependency(fixture.root, '@fixture/c', '@fixture/b')).resolves.toBe('workspace:^');
+      await expect(manifestVersion(fixture.root, '@fixture/b')).resolves.toBe('1.0.1');
+
+      // No bump commits at all: there was no manifest change to commit.
+      const bumpLog = await git(['log', '--format=%s', '--grep=^chore(deps):', 'main'], { cwd: fixture.root });
+      expect(bumpLog.trim()).toBe('');
+    } finally {
+      await fixture.remove();
+    }
+  }, 240_000);
+
   it('releases only the package with changes; the packages upstream of it release nothing', async () => {
     const fixture = await createWorkspaceFixture(chainPackages, [
       { message: 'feat(c): standalone feature', files: { 'packages/c/src/index.js': 'export const c = 2;\n' } },
