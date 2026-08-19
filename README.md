@@ -144,6 +144,7 @@ Every stage is also exported individually — `discoverWorkspace`, `buildDepende
 
 - A git repository with a pushable `origin` (semantic-release verifies push access even in dry runs, and pushes tags and release commits in real ones).
 - A git identity (`user.name`/`user.email`) in CI for the `[skip ci]` bump commits, or the semantic-release-bot fallback identity is used automatically.
+- A branch checkout, not a detached HEAD: dependency-bump commits are pushed to the current branch by name, so a detached HEAD stops the run with a `WorkspaceStateError` rather than pushing `HEAD:HEAD` at the remote. CI checkouts that default to a detached HEAD need the branch checked out explicitly.
 - A recognised CI environment for real runs (semantic-release refuses to publish from an unknown environment unless told otherwise); outside CI it falls back to dry-run behaviour.
 - Merge commits count for no package: `git log --name-only` lists no files for them, so their changes arrive through their parents, which the same range covers individually. Squash-merge workflows are unaffected, since a squash commit is an ordinary commit with a full file list.
 
