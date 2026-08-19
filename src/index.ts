@@ -1,7 +1,41 @@
 /**
  * @exadev/semantic-release-workspace -- independent per-package semantic-release orchestration for pnpm workspaces, without lockstep versioning.
  *
- * The public programmatic entry point. The orchestration API (workspace discovery, per-package release-eligibility analysis, and the driver that invokes semantic-release per package) lands here in a follow-up change; this barrel re-exports the one placeholder module that exists now so the package's build, lint, and publish pipeline has a real entry point to exercise.
+ * The public programmatic surface: discover a workspace and its inter-package dependency graph, order it topologically, rewrite dependency ranges when a sibling releases, and drive the whole release run. `releaseWorkspace` composes all of it; the individual pieces are exported so an embedder can inspect or reuse any stage.
  */
 
 export { packageName } from './package-name';
+
+export { discoverWorkspace, type Workspace, type WorkspacePackage } from './workspace';
+export { buildDependencyGraph, topologicalOrder, type DependencyGraph, type WorkspaceDependency } from './graph';
+export { updateDependencyRange, type DependencyRangeUpdate } from './version-range';
+export { readManifest, writeDependencyRange, type DependencyField, type PackageManifest } from './manifest';
+
+export {
+  createScopedPlugins,
+  filterCommitsToDirectory,
+  resolvePublishPlugins,
+  DEFAULT_PUBLISH_PLUGINS,
+  type DependencyBump,
+  type DependencyBumpSource,
+  type PublishPluginSpec,
+  type ResolvedPublishPlugin,
+  type ScopedPlugins,
+} from './plugins';
+export {
+  releaseWorkspace,
+  type ReleaseWorkspaceOptions,
+  type WorkspaceReleaseOutcome,
+  type PackageReleaseOutcome,
+  type AppliedDependencyBump,
+} from './release';
+
+export {
+  WorkspaceReleaseError,
+  WorkspaceDiscoveryError,
+  DependencyCycleError,
+  UnsupportedDependencyRangeError,
+  ReleaseConfigurationError,
+  GitCommandError,
+  WorkspaceStateError,
+} from './errors';
