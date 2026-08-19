@@ -10,7 +10,8 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       include: ['src/**/*.ts'],
-      exclude: ['src/**/*.test.ts'],
+      // git-workspace-fixture.ts builds the throwaway git workspaces the tests run against. It is test support rather than shipped code (nothing exports it from src/index.ts, so tsdown never bundles it), and counting it as production code would report coverage of the test harness alongside coverage of the library.
+      exclude: ['src/**/*.test.ts', 'src/git-workspace-fixture.ts'],
       reporter: ['text', 'html', 'cobertura'],
     },
     projects: [
