@@ -47,6 +47,8 @@ Dependency-range handling, in full:
 | `*`, `x`, `latest` | Nothing to update and the published range is unaffected — no bump, no forced release |
 | Compound ranges (`>=1.0.0 <2.0.0`), unions (`1.x \|\| 2.x`), `<`/`<=` bounds, `catalog:`, `npm:` aliases, git/tarball URLs | The run stops with `UnsupportedDependencyRangeError` — rewriting any of these wrongly, or leaving them silently stale, both produce a published manifest that disagrees with the repository, so neither is attempted |
 
+Every workspace dependency edge's range is validated against this table before the release loop starts, not just when the dependency it names happens to release: an unsupported range is a static property of the manifests, knowable at discovery time, so `UnsupportedDependencyRangeError` stops the run before the first package publishes, rather than after some upstream sibling has already been published, tagged, committed, and pushed.
+
 For that reason concrete ranges (which the orchestrator maintains for you) are the recommended mode. Publishing `workspace:` ranges correctly additionally requires a pack step that substitutes them, as `pnpm publish` does.
 
 ## Relationship to @qiwi/multi-semantic-release

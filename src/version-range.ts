@@ -29,11 +29,19 @@ const WILDCARD_RANGES: readonly string[] = ['', '*', 'x', 'X', 'latest'];
 const REWRITABLE_COMPARATOR = /^(\^|~|>=|=)?(\d+\.\d+\.\d+(?:-[\dA-Za-z.-]+)?(?:\+[\dA-Za-z.-]+)?)$/;
 
 /**
- * Computes what a dependency range on a workspace sibling becomes once that sibling releases `version`.
- *
- * Anything not covered by the cases above throws: a compound range (`>=1.0.0 <2.0.0`), a union (`1.x || 2.x`), a `catalog:` reference whose real version lives in `pnpm-workspace.yaml`, an `npm:` alias, a git or tarball URL. Guessing at those would either corrupt the range or silently leave it pointing at a version that no longer exists in the workspace, and a stale published range is exactly the divergence this tool exists to prevent.
+ * What a dependency range's own shape supports, independent of any particular version -- the classification that decides whether `updateDependencyRange` can succeed at all, split out so it can be checked for every workspace dependency edge before a release run starts, not just when the range's sibling actually releases.
  */
-export function updateDependencyRange(current: string, version: string): DependencyRangeUpdate {
+export type DependencyRangeShape =
+  | { readonly kind: 'rewritable'; readonly workspacePrefixed: boolean; readonly comparator: string }
+  | { readonly kind: 'resolved-at-publish' }
+  | { readonly kind: 'wildcard' };
+
+/**
+ * Classifies a dependency range's shape, throwing `UnsupportedDependencyRangeError` for anything this tool cannot rewrite with confidence: a compound range (`>=1.0.0 <2.0.0`), a union (`1.x || 2.x`), a `catalog:` reference whose real version lives in `pnpm-workspace.yaml`, an `npm:` alias, a git or tarball URL. Guessing at those would either corrupt the range or silently leave it pointing at a version that no longer exists in the workspace, and a stale published range is exactly the divergence this tool exists to prevent.
+ *
+ * This never needs the version a sibling is releasing: every case above depends only on the shape of `current` itself, which is what lets `releaseWorkspace` validate every workspace dependency edge up front, before any package has published anything, rather than discovering an unsupported range only when the first dependency it names happens to release.
+ */
+export function classifyDependencyRange(current: string): DependencyRangeShape {
   const range = current.trim();
 
   if (range.startsWith(WORKSPACE_PROTOCOL)) {
@@ -41,11 +49,11 @@ export function updateDependencyRange(current: string, version: string): Depende
     if (PUBLISH_RESOLVED_WORKSPACE_SUFFIXES.includes(suffix)) {
       return { kind: 'resolved-at-publish' };
     }
-    const inner = updateDependencyRange(suffix, version);
-    if (inner.kind !== 'rewritten') {
+    const inner = classifyDependencyRange(suffix);
+    if (inner.kind !== 'rewritable') {
       throw new UnsupportedDependencyRangeError(`Cannot bump the workspace dependency range "${current}": only "workspace:*", "workspace:^", "workspace:~", and "workspace:" followed by a single concrete version range are supported.`);
     }
-    return { kind: 'rewritten', range: `${WORKSPACE_PROTOCOL}${inner.range}` };
+    return { kind: 'rewritable', workspacePrefixed: true, comparator: inner.comparator };
   }
 
   if (range.startsWith(CATALOG_PROTOCOL)) {
@@ -65,6 +73,17 @@ export function updateDependencyRange(current: string, version: string): Depende
     throw new UnsupportedDependencyRangeError(`Cannot bump the workspace dependency range "${current}": only a single "^", "~", ">=", "=", or bare version comparator can be rewritten in place.`);
   }
 
-  const comparator = match[1] ?? '';
-  return { kind: 'rewritten', range: `${comparator}${version}` };
+  return { kind: 'rewritable', workspacePrefixed: false, comparator: match[1] ?? '' };
+}
+
+/**
+ * Computes what a dependency range on a workspace sibling becomes once that sibling releases `version`, by classifying the range's shape and then, for a rewritable shape, substituting `version` in place of the version it currently names.
+ */
+export function updateDependencyRange(current: string, version: string): DependencyRangeUpdate {
+  const shape = classifyDependencyRange(current);
+  if (shape.kind !== 'rewritable') {
+    return shape;
+  }
+  const rewritten = `${shape.comparator}${version}`;
+  return { kind: 'rewritten', range: shape.workspacePrefixed ? `${WORKSPACE_PROTOCOL}${rewritten}` : rewritten };
 }

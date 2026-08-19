@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { UnsupportedDependencyRangeError } from './errors';
-import { updateDependencyRange } from './version-range';
+import { classifyDependencyRange, updateDependencyRange } from './version-range';
 
 describe('updateDependencyRange', () => {
   it('rewrites the version in a single caret comparator, preserving the comparator', () => {
@@ -45,5 +45,23 @@ describe('updateDependencyRange', () => {
 
   it('ignores surrounding whitespace', () => {
     expect(updateDependencyRange('  ^1.0.0  ', '1.2.3')).toEqual({ kind: 'rewritten', range: '^1.2.3' });
+  });
+});
+
+describe('classifyDependencyRange', () => {
+  it('classifies a rewritable range without needing any released version', () => {
+    expect(classifyDependencyRange('^1.0.0')).toEqual({ kind: 'rewritable', workspacePrefixed: false, comparator: '^' });
+    expect(classifyDependencyRange('workspace:~1.0.0')).toEqual({ kind: 'rewritable', workspacePrefixed: true, comparator: '~' });
+  });
+
+  it('classifies publish-resolved and wildcard shapes', () => {
+    expect(classifyDependencyRange('workspace:^')).toEqual({ kind: 'resolved-at-publish' });
+    expect(classifyDependencyRange('*')).toEqual({ kind: 'wildcard' });
+  });
+
+  it('throws for every shape updateDependencyRange also rejects, independent of any version', () => {
+    expect(() => classifyDependencyRange('>=1.0.0 <2.0.0')).toThrow(UnsupportedDependencyRangeError);
+    expect(() => classifyDependencyRange('catalog:')).toThrow(/catalog:/);
+    expect(() => classifyDependencyRange('npm:other-package@^1.0.0')).toThrow(/alias/);
   });
 });

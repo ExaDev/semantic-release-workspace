@@ -2,7 +2,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { formatDependencyBumpMessage } from './dependency-bump-commit';
-import { DependencyCycleError } from './errors';
+import { DependencyCycleError, UnsupportedDependencyRangeError } from './errors';
 import { git } from './git';
 import { type FixturePackage, createWorkspaceFixture } from './git-workspace-fixture';
 import { isJsonObject } from './json';
@@ -299,6 +299,27 @@ describe('releaseWorkspace against a real git workspace', () => {
       await fixture.remove();
     }
   }, 240_000);
+
+  it('rejects an unsupported dependency range before anything releases, not only once the dependency it names has already been published', async () => {
+    const fixture = await createWorkspaceFixture(
+      [
+        { name: '@fixture/a', version: '1.0.0' },
+        { name: '@fixture/b', version: '1.0.0', dependencies: { '@fixture/a': '>=1.0.0 <2.0.0' } },
+      ],
+      [{ message: 'feat(a): second feature', files: { 'packages/a/src/index.js': 'export const a = 2;\n' } }],
+    );
+    try {
+      const failure = releaseWorkspace({ root: fixture.root, env: releaseEnv(), plugins: FIXTURE_PLUGINS });
+      await expect(failure).rejects.toBeInstanceOf(UnsupportedDependencyRangeError);
+
+      // Nothing published: the run fails before the loop starts, so `a` carries no new tag and no release commit, and the remote holds only the fixture's own scaffolding.
+      const localTags = (await git(['tag', '--list'], { cwd: fixture.root })).split('\n').filter(Boolean).sort();
+      expect(localTags).toEqual(['@fixture/a@1.0.0', '@fixture/b@1.0.0']);
+      await expect(manifestVersion(fixture.root, '@fixture/a')).resolves.toBe('1.0.0');
+    } finally {
+      await fixture.remove();
+    }
+  }, 60_000);
 });
 
 async function readManifest(root: string, packageName: string): Promise<Record<string, unknown>> {
