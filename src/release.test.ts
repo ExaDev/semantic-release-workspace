@@ -238,6 +238,30 @@ describe('releaseWorkspace against a real git workspace', () => {
       await fixture.remove();
     }
   }, 240_000);
+
+  it('releases a package whose directory name contains a non-ASCII character', async () => {
+    const fixture = await createWorkspaceFixture(
+      [
+        { name: '@fixture/plain', version: '1.0.0' },
+        // A directory distinct from the (necessarily plain-ASCII) npm package name -- pnpm only needs the glob to match the directory, not the directory to match the name -- so this exercises the C-quoting fix without needing an npm name real npm would reject.
+        { name: '@fixture/cafe', version: '1.0.0', directory: 'café' },
+      ],
+      [
+        { message: 'feat(plain): second feature', files: { 'packages/plain/src/index.js': 'export const plain = 2;\n' } },
+        { message: 'feat(cafe): second feature', files: { 'packages/café/src/index.js': 'export const cafe = 2;\n' } },
+      ],
+    );
+    try {
+      const outcome = await releaseWorkspace({ root: fixture.root, env: releaseEnv(), plugins: FIXTURE_PLUGINS });
+
+      // Before the core.quotePath fix, git C-quoted the café path, the prefix comparison never matched, and this package silently released nothing while its plain-ASCII sibling released normally.
+      const byName = new Map(outcome.packages.map((pkg) => [pkg.name, pkg]));
+      expect(byName.get('@fixture/plain')).toMatchObject({ released: true, version: '1.1.0', type: 'minor' });
+      expect(byName.get('@fixture/cafe')).toMatchObject({ released: true, version: '1.1.0', type: 'minor' });
+    } finally {
+      await fixture.remove();
+    }
+  }, 240_000);
 });
 
 async function readManifest(root: string, packageName: string): Promise<Record<string, unknown>> {
