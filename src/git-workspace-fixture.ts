@@ -1,11 +1,15 @@
+import { execFile } from 'node:child_process';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { promisify } from 'node:util';
 import { git } from './git';
 
+const execFileAsync = promisify(execFile);
+
 /**
- * Builds a throwaway pnpm workspace with a real git repository, a real bare remote, real commits, and real `name@version` tags -- the substrate the orchestrator's tests drive end to end. Nothing here is installed with pnpm: the orchestrator's discovery reads `pnpm-workspace.yaml` and manifests, and semantic-release only needs git.
+ * Builds a throwaway pnpm workspace with a real git repository, a real bare remote, real commits, and real `name@version` tags -- the substrate the orchestrator's tests drive end to end. The orchestrator's own discovery reads only `pnpm-workspace.yaml` and manifests and never invokes pnpm itself, but `bumpDependents`'s lockfile regeneration does, so a dependency-range bump against this fixture runs a real `pnpm install --lockfile-only`.
  */
 
 export interface FixturePackage {
@@ -33,6 +37,10 @@ export interface WorkspaceFixture {
 export interface WorkspaceFixtureOptions {
   /** Path, relative to the git repository's toplevel, where `pnpm-workspace.yaml` and the packages live. Defaults to the repository toplevel itself. Set this to reproduce a workspace that is not itself the git toplevel -- e.g. a monorepo checked out with the pnpm workspace one level below the repository root. */
   readonly workspaceSubdirectory?: string;
+  /**
+   * Generates a real `pnpm-lock.yaml` from the fixture's own packages (via `pnpm install --lockfile-only`) and commits it as its own history entry before the fixture's own commits run, for tests that need a lockfile already present in history to observe it being kept in sync across a bump. Defaults to `false`: most tests don't assert anything about the lockfile, so they don't need one to already exist -- `regenerateLockfile` (see `pnpm.ts`) creates it from nothing the first time a dependency-range bump runs, same as it would in a repository adopting this tool for the first time.
+   */
+  readonly pnpmLockfile?: boolean;
 }
 
 export async function createWorkspaceFixture(
@@ -53,7 +61,8 @@ export async function createWorkspaceFixture(
   // semantic-release creates lightweight tags (`git tag <name> <sha>`). A developer machine with a global `tag.gpgsign true` would turn that into an annotated signing request with no message and no key, so the fixture repository pins the default off for everything that tags inside it -- the fixture builder and semantic-release's own runs alike.
   await git(['config', 'tag.gpgsign', 'false'], { cwd: root });
 
-  await writeFile(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - packages/*\n');
+  // linkWorkspacePackages is always on: any fixture with a dependent whose range gets rewritten now exercises a real `pnpm install --lockfile-only` (see `regenerateLockfile` in `release.ts`'s bumpDependents), and without it pnpm would try to resolve a plain semver range like `^1.0.0` against the real npm registry -- where none of these `@fixture/*` names exist -- rather than linking the workspace sibling.
+  await writeFile(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - packages/*\nlinkWorkspacePackages: true\n');
   await commit(root, 'chore: scaffold workspace', ['pnpm-workspace.yaml']);
 
   for (const pkg of packages) {
@@ -79,6 +88,11 @@ export async function createWorkspaceFixture(
       `packages/${directoryName}/src/index.js`,
     ]);
     await git(['tag', tagFor(pkg.name, pkg.version)], { cwd: root });
+  }
+
+  if (options.pnpmLockfile === true) {
+    await execFileAsync('pnpm', ['install', '--lockfile-only'], { cwd: root });
+    await commit(root, 'chore: lockfile', ['pnpm-lock.yaml']);
   }
 
   for (const fixtureCommit of commits) {
