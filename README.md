@@ -22,7 +22,7 @@ One orchestrator run, five stages:
 
 When a package releases version `V`, every *not-yet-released-this-run* workspace package that depends on it gets its dependency range updated — and the timing of that update is the least obvious part of the whole design, because getting it wrong is exactly the bug class the documents.js ecosystem's old cross-repo automation hit (the `sibling-dependency-update` heal-job downgrade race: repository state and published manifests disagreeing, then automation "healing" in the wrong direction; see [documents.js#664](https://github.com/ExaDev/documents.js/issues/664)).
 
-The orchestrator's rule: **the moment a package's release completes, each dependent's manifest is rewritten on disk, committed, and pushed — before anything else happens.** A bump commit looks like:
+The orchestrator's rule: **the moment a package's release completes, each dependent's manifest is rewritten on disk, `pnpm-lock.yaml` is regenerated to match, and both are committed together and pushed — before anything else happens.** A bump commit looks like:
 
 ```
 chore(deps): bump @fixture/a to ^1.1.0 in @fixture/b [skip ci]
@@ -31,6 +31,7 @@ chore(deps): bump @fixture/a to ^1.1.0 in @fixture/b [skip ci]
 Why commit immediately, rather than the alternatives:
 
 - **Why commit at all (not just edit the working tree)?** A dependent's semantic-release run analyses *git history*, not the working tree. An uncommitted manifest edit is invisible to its commit analysis, so the dependent could be judged "no changes" and skip a release — leaving a manifest that names a version the registry has, but which the dependent never published, stranded uncommitted in one developer's checkout.
+- **Why regenerate `pnpm-lock.yaml` in the same commit?** `pnpm install --frozen-lockfile` (what CI runs) rejects a tree where the lockfile's recorded specifier for a workspace dependency disagrees with the manifest. Committing the manifest bump without regenerating the lockfile leaves exactly that disagreement, breaking `--frozen-lockfile` installs on the dependent's directory until someone runs `pnpm install` by hand and commits the result — so the lockfile is regenerated and committed alongside the manifest, never as a separate step.
 - **Why before the dependent's own run (not after)?** The dependent's release commit and its published artifact must carry the new range. Bumping after would publish the dependent with a stale range, then mutate the repository afterwards — the repository/published-artifact disagreement this tool exists to prevent.
 - **Why push immediately?** The same crash-consistency discipline semantic-release applies to its own release commits: if the orchestrator dies halfway through the run, everything pushed so far (releases, tags, bump commits) is a consistent prefix, and the next run picks up cleanly from the tags. `[skip ci]` on the bump message stops the push from triggering a *second*, racing release run. The bump commit also carries a machine-parseable trailer alongside its human-readable subject, recording the dependency, its released version, and the new range -- so a fresh run's per-package analysis recognises a bump commit that already exists in history (whether from earlier in the same run or left over from a run that stopped right after pushing it) and still forces the dependent's patch release, rather than depending on a record that only ever existed in the process that made the commit.
 
@@ -42,7 +43,7 @@ Dependency-range handling, in full:
 
 | Range in the dependent's manifest | What happens |
 | --- | --- |
-| `^1.0.0`, `~1.0.0`, `>=1.0.0`, `=1.0.0`, `1.0.0`, `workspace:^1.0.0` | Rewritten in place, preserving the comparator (`^1.0.0` → `^1.1.0`), committed and pushed; dependent gets at least a patch release |
+| `^1.0.0`, `~1.0.0`, `>=1.0.0`, `=1.0.0`, `1.0.0`, `workspace:^1.0.0` | Rewritten in place, preserving the comparator (`^1.0.0` → `^1.1.0`); `pnpm-lock.yaml` is regenerated to match, and both are committed and pushed together; dependent gets at least a patch release |
 | `workspace:*`, `workspace:^`, `workspace:~` | No manifest edit (pnpm resolves these at pack time), but the published range still changes, so the dependent still gets a patch release |
 | `*`, `x`, `latest` | Nothing to update and the published range is unaffected — no bump, no forced release |
 | Compound ranges (`>=1.0.0 <2.0.0`), unions (`1.x \|\| 2.x`), `<`/`<=` bounds, `catalog:`, `npm:` aliases, git/tarball URLs | The run stops with `UnsupportedDependencyRangeError` — rewriting any of these wrongly, or leaving them silently stale, both produce a published manifest that disagrees with the repository, so neither is attempted |

@@ -15,6 +15,7 @@ import {
   createScopedPlugins,
 } from './plugins';
 import { type DependencyField, writeDependencyRange } from './manifest';
+import { regenerateLockfile } from './pnpm';
 import { classifyDependencyRange, updateDependencyRange } from './version-range';
 import { discoverWorkspace, type Workspace, type WorkspacePackage } from './workspace';
 
@@ -185,10 +186,13 @@ async function runPackageRelease(pkg: WorkspacePackage, options: {
   }
 }
 
+/** The one filename pnpm recognises as its lockfile, always sitting beside `pnpm-workspace.yaml` at the workspace root regardless of which dependent's manifest a bump rewrites. */
+const LOCKFILE_FILENAME = 'pnpm-lock.yaml';
+
 /**
  * Rewrites the released package's range in every dependent's manifest, immediately after the release and before any dependent's own turn.
  *
- * The bump is committed (and pushed) right away rather than staged, because a dependent's semantic-release run analyses git history, not the working tree: an uncommitted bump would be invisible to its commit analysis, and would be stranded uncommitted if the dependent then released nothing -- a manifest that names versions the registry has never seen. Committing immediately means the dependent's own run sees the bump commit (it touches only the dependent's directory, so it passes that dependent's path filter), the forced-patch logic in the scoped analyzer covers the case where that bump is the dependent's only change, and a run interrupted partway leaves the remote describing exactly what was published. Pushing immediately mirrors what semantic-release itself does with release commits.
+ * The bump is committed (and pushed) right away rather than staged, because a dependent's semantic-release run analyses git history, not the working tree: an uncommitted bump would be invisible to its commit analysis, and would be stranded uncommitted if the dependent then released nothing -- a manifest that names versions the registry has never seen. Committing immediately means the dependent's own run sees the bump commit (it touches only the dependent's directory, so it passes that dependent's path filter), the forced-patch logic in the scoped analyzer covers the case where that bump is the dependent's only change, and a run interrupted partway leaves the remote describing exactly what was published. Pushing immediately mirrors what semantic-release itself does with release commits. The lockfile is regenerated (`pnpm install --lockfile-only`) and committed alongside the manifest for the same reason: a manifest bump committed without it leaves `pnpm-lock.yaml` naming the old range, which `pnpm install --frozen-lockfile` (what CI runs) then rejects.
  */
 async function bumpDependents(released: WorkspacePackage, version: string, graph: DependencyGraph, options: {
   readonly workspace: Workspace;
@@ -212,11 +216,13 @@ async function bumpDependents(released: WorkspacePackage, version: string, graph
     if (update.kind === 'rewritten') {
       if (!options.dryRun) {
         await writeDependencyRange(dependent.manifestPath, edge.field, released.name, update.range);
+        // Regenerated before the commit below, not after, so the two file writes always land in the same commit -- see the lockfile paragraph in this function's own doc comment.
+        await regenerateLockfile({ cwd: options.workspace.root });
         // The commit's message carries [skip ci] for the same reason semantic-release's own release commits do: pushing it must not trigger another CI release run that would race this one. It also carries a machine-parseable trailer (see dependency-bump-commit.ts) so a run that starts after this commit already exists in history -- including one recovering from a crash right after this push -- still recognises it as a dependency bump, rather than only a run that made the commit itself in memory recognising it.
         const message = formatDependencyBumpMessage({ dependency: released.name, version, range: update.range, dependent: edge.dependent });
-        await commitFiles([`${dependent.relativeDirectory}/package.json`], message, { cwd: options.workspace.root, identity: options.identity });
+        await commitFiles([`${dependent.relativeDirectory}/package.json`, LOCKFILE_FILENAME], message, { cwd: options.workspace.root, identity: options.identity });
         await pushHead({ cwd: options.workspace.root });
-        options.log(`Bumped ${released.name} to ${update.range} in ${edge.dependent}, committed and pushed`);
+        options.log(`Bumped ${released.name} to ${update.range} in ${edge.dependent}, regenerated the lockfile, committed and pushed`);
       } else {
         options.log(`Would bump ${released.name} to ${update.range} in ${edge.dependent} (${edge.field})`);
       }

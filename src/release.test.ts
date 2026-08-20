@@ -300,6 +300,31 @@ describe('releaseWorkspace against a real git workspace', () => {
     }
   }, 240_000);
 
+  it('regenerates pnpm-lock.yaml alongside a dependency-range bump, so the two never land out of sync', async () => {
+    const fixture = await createWorkspaceFixture(
+      [
+        { name: '@fixture/a', version: '1.0.0' },
+        { name: '@fixture/b', version: '1.0.0', dependencies: { '@fixture/a': '^1.0.0' } },
+      ],
+      [{ message: 'feat(a): second feature', files: { 'packages/a/src/index.js': 'export const a = 2;\n' } }],
+      { pnpmLockfile: true },
+    );
+    try {
+      await releaseWorkspace({ root: fixture.root, env: releaseEnv(), plugins: FIXTURE_PLUGINS });
+
+      // The bump commit must carry the regenerated lockfile alongside the manifest it rewrote -- committing only the manifest is exactly the bug: `pnpm install --frozen-lockfile` then rejects the resulting tree because the lockfile still names the old specifier.
+      const bumpLog = await git(['log', '--name-only', '--format=%H%n%s', '--grep=^chore(deps):', 'main'], { cwd: fixture.root });
+      expect(bumpLog).toContain('chore(deps): bump @fixture/a to ^1.1.0 in @fixture/b [skip ci]');
+      expect(bumpLog).toContain('pnpm-lock.yaml');
+
+      const lockfile = await readFile(join(fixture.root, 'pnpm-lock.yaml'), 'utf8');
+      const bImporter = lockfile.slice(lockfile.indexOf('packages/b:'));
+      expect(bImporter).toMatch(/specifier:\s*\^1\.1\.0/);
+    } finally {
+      await fixture.remove();
+    }
+  }, 240_000);
+
   it('rejects an unsupported dependency range before anything releases, not only once the dependency it names has already been published', async () => {
     const fixture = await createWorkspaceFixture(
       [

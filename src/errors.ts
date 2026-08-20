@@ -42,3 +42,10 @@ export class GitCommandError extends WorkspaceReleaseError {
 
 /** The workspace's git state does not support the release operation -- for example a detached HEAD, which names no branch that dependency-bump commits could be pushed to. */
 export class WorkspaceStateError extends WorkspaceReleaseError {}
+
+/** `pnpm install --lockfile-only` failed while regenerating the lockfile for a dependency-range bump. Left unhandled, a dependent's manifest would be committed with `pnpm-lock.yaml` still naming the old range -- the exact drift this step exists to prevent -- so the bump aborts instead of committing a manifest and lockfile that disagree. */
+export class PnpmCommandError extends WorkspaceReleaseError {
+  constructor(cwd: string, detail: string) {
+    super(`pnpm install --lockfile-only failed in ${cwd}: ${detail}`);
+  }
+}
