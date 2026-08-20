@@ -1,3 +1,10 @@
+## [1.0.1](https://github.com/ExaDev/semantic-release-workspace/compare/v1.0.0...v1.0.1) (2026-08-20)
+
+
+### Bug Fixes
+
+* default env to process.env, since spreading undefined silently drops it ([13f6992](https://github.com/ExaDev/semantic-release-workspace/commit/13f69922b49a4896d712816476b08698a309407b))
+
 # 1.0.0 (2026-08-19)
 
 
