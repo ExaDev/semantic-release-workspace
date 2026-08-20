@@ -1,3 +1,10 @@
+## [1.0.3](https://github.com/ExaDev/semantic-release-workspace/compare/v1.0.2...v1.0.3) (2026-08-20)
+
+
+### Bug Fixes
+
+* regenerate and commit the lockfile alongside every dependency bump ([40e37a3](https://github.com/ExaDev/semantic-release-workspace/commit/40e37a35a60b052ec79a150199c768f8a3ab1460))
+
 ## [1.0.2](https://github.com/ExaDev/semantic-release-workspace/compare/v1.0.1...v1.0.2) (2026-08-20)
 
 
