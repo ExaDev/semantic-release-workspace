@@ -71,6 +71,7 @@ export async function releaseWorkspace(options: ReleaseWorkspaceOptions = {}): P
   const root = resolve(options.root ?? process.cwd());
   const log = options.log ?? console.log;
   const dryRun = options.dryRun === true;
+  const env = options.env ?? process.env;
 
   const workspace = await discoverWorkspace(root);
   const graph = buildDependencyGraph(workspace.packages);
@@ -98,7 +99,7 @@ export async function releaseWorkspace(options: ReleaseWorkspaceOptions = {}): P
       generateNotesConfig,
       bumpsForThisPackage,
       dryRun,
-      env: options.env,
+      env,
       branches: options.branches,
     });
 
