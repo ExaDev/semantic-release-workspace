@@ -1,12 +1,50 @@
 import { describe, expect, it } from 'vitest';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { AnalyzeCommitsContext } from 'semantic-release';
 import { ReleaseConfigurationError } from './errors';
-import { parseChangedPaths } from './git';
-import { filterCommitsToDirectory, parsePublishPluginSpec, resolvePublishPlugins } from './plugins';
+import { git, parseChangedPaths } from './git';
+import { createScopedPlugins, filterCommitsToDirectory, parsePublishPluginSpec, resolvePublishPlugins } from './plugins';
+import type { WorkspacePackage } from './workspace';
 
 function commit(hash: string): { readonly hash: string } {
   return { hash };
+}
+
+/** A real, minimal git repository with a single commit and no tags -- the substrate `commitsForPackage` needs, since it runs a real `git log`. Deliberately lighter than `createWorkspaceFixture`, which tags every package it scaffolds and so cannot represent a package's first release. */
+async function createUntaggedGitRepo(): Promise<string> {
+  const directory = await mkdtemp(join(tmpdir(), 'semantic-release-workspace-plugins-'));
+  await git(['init', '--initial-branch=main', directory], { cwd: directory });
+  await git(['config', 'user.name', 'Fixture Release Bot'], { cwd: directory });
+  await git(['config', 'user.email', 'fixture@example.com'], { cwd: directory });
+  await git(['commit', '--allow-empty', '-m', 'chore: scaffold'], { cwd: directory });
+  return directory;
+}
+
+function fakeWorkspacePackage(directory: string): WorkspacePackage {
+  return {
+    name: 'example',
+    version: '0.0.0',
+    directory,
+    relativeDirectory: '.',
+    repoRelativeDirectory: '.',
+    manifestPath: join(directory, 'package.json'),
+    dependencies: new Map(),
+  };
+}
+
+/**
+ * A test double for semantic-release's own analyze-commits context. semantic-release's real `getLastRelease` returns `{}` (not `undefined`, and not a fully-populated `LastRelease`) when a package has no prior tag -- contradicting its own type declaration, which is exactly why the production code under test reads `lastRelease` defensively rather than trusting the type. Only the fields `commitsForPackage` and the wrapped `@semantic-release/commit-analyzer` plugin actually read (`cwd`, `commits`, `lastRelease`, `logger.log`) are populated; the rest of semantic-release's `Context` surface (stdout, stderr, env, envCi, branch, branches, options) is never touched by either, and instantiating real values for them would add nothing but boilerplate.
+ */
+function fakeFirstReleaseContext(cwd: string): AnalyzeCommitsContext & { cwd: string } {
+  return {
+    cwd,
+    commits: [],
+    releases: [],
+    lastRelease: {},
+    logger: { log: () => {}, warn: () => {}, error: () => {}, success: () => {} },
+  } as unknown as AnalyzeCommitsContext & { cwd: string };
 }
 
 describe('parseChangedPaths', () => {
@@ -51,6 +89,24 @@ describe('filterCommitsToDirectory', () => {
 
   it('keeps commits the path map does not cover, erring towards releasing', () => {
     expect(filterCommitsToDirectory([commit('not-in-map')], changedPaths, 'packages/a')).toHaveLength(1);
+  });
+});
+
+describe('createScopedPlugins', () => {
+  it('analyses a package on its first release, when there is no prior tag to diff commits from', async () => {
+    const directory = await createUntaggedGitRepo();
+    try {
+      const scoped = createScopedPlugins({
+        pkg: fakeWorkspacePackage(directory),
+        analyzeCommitsConfig: {},
+        generateNotesConfig: {},
+        bumps: { bumpsFor: () => [] },
+      });
+      const result = await scoped.analyzeCommits({}, fakeFirstReleaseContext(directory));
+      expect(result).toBe(false);
+    } finally {
+      await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
   });
 });
 

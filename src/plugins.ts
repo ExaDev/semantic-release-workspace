@@ -69,7 +69,10 @@ export function createScopedPlugins(scope: {
   async function commitsForPackage(context: AnalyzeCommitsContext & { cwd: string }): Promise<readonly Commit[]> {
     // An absent lastRelease means semantic-release fetched the package's whole history, so the path map is built over the same unbounded range.
     const from = context.lastRelease?.gitHead ?? undefined;
-    if (cached?.from !== from) {
+    // Two branches, not `cached === undefined || cached.from !== from`: when this is the very first call for a package with no prior release, both `cached` and `from` are `undefined`, and a single optional-chained comparison cannot distinguish "nothing cached yet" from "cached, and it happens to match".
+    if (cached === undefined) {
+      cached = { from, paths: changedPathsSince(from, { cwd: context.cwd }) };
+    } else if (cached.from !== from) {
       cached = { from, paths: changedPathsSince(from, { cwd: context.cwd }) };
     }
     return filterCommitsToDirectory(context.commits, await cached.paths, scope.pkg.repoRelativeDirectory);
