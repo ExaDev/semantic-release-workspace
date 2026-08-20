@@ -97,7 +97,8 @@ export async function createWorkspaceFixture(
   await git(['remote', 'add', 'origin', pathToFileURL(remote).href], { cwd: root });
   await git(['push', '-u', 'origin', 'main', '--tags'], { cwd: root });
 
-  return { root, remote, remove: () => rm(directory, { recursive: true, force: true }) };
+  // maxRetries/retryDelay: `git push`/`git commit` can leave a background `git gc --auto` still writing into `remote.git/objects` or `.git/objects` for a moment after the command that triggered it returns, which occasionally loses the race against this recursive delete with ENOTEMPTY -- exactly the error class Node's own retry option exists for.
+  return { root, remote, remove: () => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }) };
 }
 
 async function commit(root: string, message: string, paths: readonly string[]): Promise<void> {
