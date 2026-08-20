@@ -1,3 +1,11 @@
+## [1.0.2](https://github.com/ExaDev/semantic-release-workspace/compare/v1.0.1...v1.0.2) (2026-08-20)
+
+
+### Bug Fixes
+
+* retry temp workspace cleanup past a lingering git gc race ([fede08c](https://github.com/ExaDev/semantic-release-workspace/commit/fede08c5cd20b2ef14aa4fc4e1bdfd05a2fcc4d3))
+* stop createScopedPlugins crashing on a package's genuine first release ([c15e40e](https://github.com/ExaDev/semantic-release-workspace/commit/c15e40e9c4e0d8a19755bd3c06327dc1ed547a20))
+
 ## [1.0.1](https://github.com/ExaDev/semantic-release-workspace/compare/v1.0.0...v1.0.1) (2026-08-20)
 
 
