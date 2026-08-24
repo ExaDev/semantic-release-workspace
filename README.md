@@ -113,7 +113,7 @@ Run it from the workspace root (or pass `--root <directory>`). A dry run analyse
 | `--plugin <spec>` | Publish-pipeline plugin, repeatable — a module name (`@semantic-release/github`) or a JSON tuple (`'["@semantic-release/git",{"assets":["package.json"]}]'`); defaults to the standard changelog/npm/github/git pipeline |
 | `--analyze-commits <json>` | Options for the wrapped @semantic-release/commit-analyzer (e.g. `'{"preset":"conventionalcommits","releaseRules":[...]}'`) |
 | `--generate-notes <json>` | Options for the wrapped @semantic-release/release-notes-generator |
-| `--config <file>` | A JSON file providing any of the above; explicit flags win |
+| `--config <file>` | A config file (`.json`, `.yaml`, `.yml`, `.js`, `.cjs`, or `.ts`, loaded via [cosmiconfig](https://github.com/cosmiconfig/cosmiconfig)) providing any of the above; explicit flags win |
 
 Listing `@semantic-release/commit-analyzer` or `@semantic-release/release-notes-generator` as a `--plugin` is rejected: the orchestrator always provides those two steps itself (wrapped), so configuring them there would be a silent no-op — pass their options via `--analyze-commits`/`--generate-notes` instead. A real (non-dry) run must include `@semantic-release/git` in the pipeline, because without it nothing commits released manifests and changelogs back to the branch.
 
