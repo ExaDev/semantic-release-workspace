@@ -1,3 +1,10 @@
+# [1.1.0](https://github.com/ExaDev/semantic-release-workspace/compare/v1.0.3...v1.1.0) (2026-08-24)
+
+
+### Features
+
+* load --config through cosmiconfig for multi-format support ([9f8d719](https://github.com/ExaDev/semantic-release-workspace/commit/9f8d719d656c485051f15c880f64e8377620fcc1))
+
 ## [1.0.3](https://github.com/ExaDev/semantic-release-workspace/compare/v1.0.2...v1.0.3) (2026-08-20)
 
 
