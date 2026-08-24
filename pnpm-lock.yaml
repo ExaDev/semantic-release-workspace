@@ -11,6 +11,9 @@ importers:
       commander:
         specifier: ^15.0.0
         version: 15.0.0
+      cosmiconfig:
+        specifier: ^9.0.2
+        version: 9.0.2(typescript@6.0.3)
       tinyglobby:
         specifier: ^0.2.17
         version: 0.2.17
