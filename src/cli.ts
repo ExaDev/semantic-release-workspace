@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFileSync } from 'node:fs';
+import { cosmiconfigSync } from 'cosmiconfig';
 import { Command, InvalidArgumentError } from 'commander';
 // resolveJsonModule lets rolldown (via tsdown) inline this package's own declared version straight into the bundle at build time -- no runtime fs read.
 import { version } from '../package.json';
@@ -32,7 +32,10 @@ export function createProgram(): Command {
   );
   release.option('--analyze-commits <json>', 'options for the wrapped @semantic-release/commit-analyzer, as a JSON object');
   release.option('--generate-notes <json>', 'options for the wrapped @semantic-release/release-notes-generator, as a JSON object');
-  release.option('--config <file>', 'JSON file providing any of the release options (dryRun, branches, plugins, analyzeCommits, generateNotes); explicit flags win');
+  release.option(
+    '--config <file>',
+    'config file (.json, .yaml, .yml, .js, .cjs, or .ts) providing any of the release options (dryRun, branches, plugins, analyzeCommits, generateNotes); explicit flags win',
+  );
   release.action(runRelease);
 
   return program;
@@ -111,7 +114,7 @@ function parsePluginSpec(raw: string): PublishPluginSpec {
   return parsed;
 }
 
-interface ReleaseConfigFile {
+export interface ReleaseConfigFile {
   readonly dryRun: boolean | undefined;
   readonly branches: readonly string[] | undefined;
   readonly plugins: readonly PublishPluginSpec[] | undefined;
@@ -119,8 +122,23 @@ interface ReleaseConfigFile {
   readonly generateNotes: Record<string, unknown> | undefined;
 }
 
-function readReleaseConfigFile(path: string): ReleaseConfigFile {
-  const parsed: unknown = parseJson(readFileSync(path, 'utf8'), '--config');
+// A single loader instance would carry cosmiconfig's own load cache across every --config read, which never helps here (the CLI reads a given path at most once per process) and would be a stale-cache hazard for the one thing that does invoke this function repeatedly: this file's own test suite loading many different fixture paths in one process.
+function readConfigFile(path: string): unknown {
+  const explorer = cosmiconfigSync('semantic-release-workspace');
+  let result: ReturnType<typeof explorer.load>;
+  try {
+    result = explorer.load(path);
+  } catch (cause) {
+    throw new InvalidArgumentError(`--config file ${path} could not be loaded: ${cause instanceof Error ? cause.message : String(cause)}`);
+  }
+  if (result === null || result.isEmpty === true) {
+    throw new InvalidArgumentError(`--config file ${path} is empty`);
+  }
+  return result.config;
+}
+
+export function readReleaseConfigFile(path: string): ReleaseConfigFile {
+  const parsed: unknown = readConfigFile(path);
   if (!isJsonObject(parsed)) {
     throw new InvalidArgumentError(`--config file ${path} must contain a JSON object`);
   }
