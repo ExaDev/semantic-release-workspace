@@ -38,7 +38,7 @@ importers:
         version: 10.0.1(eslint@10.9.0(jiti@2.6.1))
       '@exadev/eslint-config':
         specifier: ^2.1.1
-        version: 2.1.1(eslint@10.9.0(jiti@2.6.1))(typescript-eslint@8.67.0(eslint@10.9.0(jiti@2.6.1))(typescript@6.0.3))
+        version: 2.1.2(eslint@10.9.0(jiti@2.6.1))(typescript-eslint@8.67.0(eslint@10.9.0(jiti@2.6.1))(typescript@6.0.3))
       '@semantic-release/changelog':
         specifier: ^7.0.0
         version: 7.0.0(semantic-release@25.0.9(typescript@6.0.3))
@@ -288,8 +288,8 @@ packages:
     resolution: {integrity: sha512-+CNAzxglkrpNf/kKywqQfk74QjtceuOE7Qm+AF8miRvPF/wmmK5+OJOgVh3AVTT3RP2mH3+FOaxlE5v72owk0A==}
     engines: {node: ^20.19.0 || ^22.13.0 || >=24}
 
-  '@exadev/eslint-config@2.1.1':
-    resolution: {integrity: sha512-jBQHIgLSJdaIaVPqVGo+CUaZg8ytpzE35ZsOrJZMw3GN17v6ry65KDhEQbeH9Vag/or5Tcf15C8PSHwLjArlLA==}
+  '@exadev/eslint-config@2.1.2':
+    resolution: {integrity: sha512-isLVdlJ10wPn+O6iHAUQf+UQAfHvlaOfQYQVM2mUoPXsxKnDn66EvgFdWJUM9FrI/iFRI+bGzm3FfYJu/N+DTg==}
     engines: {node: '>=20'}
     peerDependencies:
       eslint: '>=10.0.0'
@@ -2098,6 +2098,10 @@ packages:
     resolution: {integrity: sha512-RvwwcruNjI1ncT5xRakeyS9Lf8lcItv34KD+aif+VH9kduAyfYBipGh12274xtenIPZ119/R9BdTBa8gAwSh0A==}
     engines: {node: '>=12'}
 
+  picomatch@4.0.7:
+    resolution: {integrity: sha512-qcJu88Q2IWqJsDD529JKMdwGm/dvInW4HvQnRwiH9JtihJvzGOscDtHE3x1pBKeUOTysQ8kVmLnJ2kJu7yhcGA==}
+    engines: {node: '>=12'}
+
   pify@3.0.0:
     resolution: {integrity: sha512-C3FsVNH1udSEX48gGX1xfvwTWfsYWj5U+8/uK15BGzIGrKoUpghX8hWZwa/OFnakBiiVNmBvemTJR5mcy7iPcg==}
     engines: {node: '>=4'}
@@ -2950,7 +2954,7 @@ snapshots:
       '@eslint/core': 1.2.1
       levn: 0.4.1
 
-  '@exadev/eslint-config@2.1.1(eslint@10.9.0(jiti@2.6.1))(typescript-eslint@8.67.0(eslint@10.9.0(jiti@2.6.1))(typescript@6.0.3))':
+  '@exadev/eslint-config@2.1.2(eslint@10.9.0(jiti@2.6.1))(typescript-eslint@8.67.0(eslint@10.9.0(jiti@2.6.1))(typescript@6.0.3))':
     dependencies:
       eslint: 10.9.0(jiti@2.6.1)
       typescript-eslint: 8.67.0(eslint@10.9.0(jiti@2.6.1))(typescript@6.0.3)
@@ -4520,6 +4524,8 @@ snapshots:
 
   picomatch@4.0.5: {}
 
+  picomatch@4.0.7: {}
+
   pify@3.0.0: {}
 
   pkg-conf@2.1.0:
@@ -4996,7 +5002,7 @@ snapshots:
   vite@8.2.1(@types/node@26.2.0)(jiti@2.6.1)(yaml@2.9.0):
     dependencies:
       lightningcss: 1.33.0
-      picomatch: 4.0.5
+      picomatch: 4.0.7
       postcss: 8.5.26
       rolldown: 1.2.5
       tinyglobby: 0.2.17
