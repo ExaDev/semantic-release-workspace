@@ -17,9 +17,34 @@ export interface GitCommandOptions {
   readonly cwd: string;
 }
 
+/**
+ * The environment variables git itself sets when it invokes a hook (`pre-push`, `pre-commit`, and friends), which then leak into every child process a hook spawns unless a child explicitly clears them: `GIT_DIR` (and, in a worktree checkout, its value points at that worktree's own git-dir under the main repository's `.git/worktrees/<name>`), `GIT_WORK_TREE`, `GIT_INDEX_FILE`, `GIT_PREFIX`, `GIT_OBJECT_DIRECTORY`, `GIT_ALTERNATE_OBJECT_DIRECTORIES`, `GIT_COMMON_DIR`, and `GIT_NAMESPACE`. Every one of these overrides git's normal cwd-based repository discovery, so if any of them survive into a `git()` call this package makes with an explicit `cwd` (most obviously `git init` on a throwaway temporary directory in the test suite's own fixtures), the command silently targets whatever repository the *outer* invocation was hooked from instead of the directory this package actually asked for -- observed directly as `git init` in a fixture's temp directory failing to lock the real repository's own `.git/config`, because `GIT_DIR` inherited from this package's own `pre-push` hook pointed straight back at it. `GIT_EXEC_PATH`, `GIT_EDITOR`, and networking/auth-related `GIT_*` variables (SSH, proxy, credential helpers) are deliberately left alone: they do not affect which repository a command targets, only how it behaves once it has found one.
+ */
+const GIT_REPOSITORY_DISCOVERY_ENV_KEYS: readonly string[] = [
+  'GIT_DIR',
+  'GIT_WORK_TREE',
+  'GIT_INDEX_FILE',
+  'GIT_PREFIX',
+  'GIT_OBJECT_DIRECTORY',
+  'GIT_ALTERNATE_OBJECT_DIRECTORIES',
+  'GIT_COMMON_DIR',
+  'GIT_NAMESPACE',
+];
+
+/** `process.env` with every repository-discovery-affecting `GIT_*` key removed -- see `GIT_REPOSITORY_DISCOVERY_ENV_KEYS`. Computed once per process rather than per call: these variables describe the process's own invocation environment, not anything a single `git()` call could legitimately want to change. */
+function sanitizedGitEnv(): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  for (const key of GIT_REPOSITORY_DISCOVERY_ENV_KEYS) {
+    delete env[key];
+  }
+  return env;
+}
+
+const SANITIZED_GIT_ENV = sanitizedGitEnv();
+
 export async function git(args: readonly string[], options: GitCommandOptions): Promise<string> {
   try {
-    const { stdout } = await execFileAsync('git', [...args], { cwd: options.cwd, maxBuffer: GIT_MAX_BUFFER_BYTES });
+    const { stdout } = await execFileAsync('git', [...args], { cwd: options.cwd, maxBuffer: GIT_MAX_BUFFER_BYTES, env: SANITIZED_GIT_ENV });
     return stdout;
   } catch (cause) {
     throw toGitCommandError(args, options.cwd, cause);
