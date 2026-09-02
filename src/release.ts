@@ -3,7 +3,7 @@ import semanticRelease from 'semantic-release';
 import type { BranchSpec, Options, Result } from 'semantic-release';
 import { formatDependencyBumpMessage } from './dependency-bump-commit';
 import { WorkspaceReleaseError } from './errors';
-import { commitFiles, pushHead, resolveCommitIdentity, type CommitIdentity } from './git';
+import { commitFiles, pushHead, resolveCommitIdentity, sanitizeGitEnv, type CommitIdentity } from './git';
 import { buildDependencyGraph, mustGet, topologicalOrder, validateDependencyRangeShapes, type DependencyGraph } from './graph';
 import { packageName } from './package-name';
 import {
@@ -87,7 +87,8 @@ export async function releaseWorkspace(options: ReleaseWorkspaceOptions = {}): P
   const root = resolve(options.root ?? process.cwd());
   const log = options.log ?? console.log;
   const dryRun = options.dryRun === true;
-  const env = options.env ?? process.env;
+  // Sanitized once here: every per-package semantic-release run below shares this one environment, so a GIT_DIR this process itself inherited from an outer git hook cannot leak into semantic-release's own internal git subprocess calls (tag, push, verifyAuth).
+  const env = sanitizeGitEnv(options.env ?? process.env);
 
   const workspace = await discoverWorkspace(root);
   const graph = buildDependencyGraph(workspace.packages);
@@ -182,7 +183,7 @@ async function runPackageRelease(pkg: WorkspacePackage, options: {
   try {
     return await semanticRelease(semanticReleaseOptions, {
       cwd: pkg.directory,
-      // A fresh copy per package: semantic-release mutates the env object it is given (setting GIT_AUTHOR_NAME and friends in CI mode), and that must not leak between packages or into the orchestrator's own git calls.
+      // A fresh copy per package: semantic-release mutates the env object it is given (setting GIT_AUTHOR_NAME and friends in CI mode), and that must not leak between packages or into the orchestrator's own git calls. Already sanitized by the caller (releaseWorkspace), so no GIT_DIR-style repository-discovery variable reaches here to begin with.
       env: { ...options.env },
     });
   } catch (cause) {

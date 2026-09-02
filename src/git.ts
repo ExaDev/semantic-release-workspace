@@ -31,20 +31,24 @@ const GIT_REPOSITORY_DISCOVERY_ENV_KEYS: readonly string[] = [
   'GIT_NAMESPACE',
 ];
 
-/** `process.env` with every repository-discovery-affecting `GIT_*` key removed -- see `GIT_REPOSITORY_DISCOVERY_ENV_KEYS`. Computed once per process rather than per call: these variables describe the process's own invocation environment, not anything a single `git()` call could legitimately want to change. */
-function sanitizedGitEnv(): NodeJS.ProcessEnv {
-  const env = { ...process.env };
+/**
+ * A copy of the given environment with every repository-discovery-affecting `GIT_*` key removed -- see `GIT_REPOSITORY_DISCOVERY_ENV_KEYS`.
+ *
+ * Exported (not just used internally by `git()`) because this package hands an environment to two different kinds of subprocess: its own `git()` calls (sanitized unconditionally below, from `process.env`, since those never take a caller-supplied environment) and semantic-release's own programmatic API, which spawns its *own* internal git subprocesses (tag, push, verifyAuth) using whatever `env` this package passes it -- release.ts and single-commit-release.ts both call this on the environment they construct for that, so a `GIT_DIR` inherited from an outer hook cannot leak into semantic-release's internal git calls either, not just into this package's own.
+ */
+export function sanitizeGitEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const sanitized = { ...env };
   for (const key of GIT_REPOSITORY_DISCOVERY_ENV_KEYS) {
-    delete env[key];
+    delete sanitized[key];
   }
-  return env;
+  return sanitized;
 }
 
-const SANITIZED_GIT_ENV = sanitizedGitEnv();
+const SANITIZED_PROCESS_GIT_ENV = sanitizeGitEnv(process.env);
 
 export async function git(args: readonly string[], options: GitCommandOptions): Promise<string> {
   try {
-    const { stdout } = await execFileAsync('git', [...args], { cwd: options.cwd, maxBuffer: GIT_MAX_BUFFER_BYTES, env: SANITIZED_GIT_ENV });
+    const { stdout } = await execFileAsync('git', [...args], { cwd: options.cwd, maxBuffer: GIT_MAX_BUFFER_BYTES, env: SANITIZED_PROCESS_GIT_ENV });
     return stdout;
   } catch (cause) {
     throw toGitCommandError(args, options.cwd, cause);

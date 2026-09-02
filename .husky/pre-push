@@ -1,2 +1,17 @@
 # Run the full test suite before push to catch breakage early.
+#
+# git invokes this hook with GIT_DIR (and, in a worktree checkout, GIT_DIR pointing at that
+# worktree's own git-dir under the main repository's .git/worktrees/<name>), GIT_WORK_TREE,
+# GIT_INDEX_FILE, GIT_PREFIX, and related repository-discovery variables set in its own
+# environment, and every one of those leaks into vitest and everything it spawns unless cleared
+# here first. The test suite's own fixtures run real `git init`/`git add`/`git commit` against
+# fresh temporary directories (git-workspace-fixture.ts) -- with GIT_DIR still pointing at this
+# repository, those commands silently target this repository instead of the temp directory the
+# test actually intended, and semantic-release's own transitive env-ci dependency falls back to
+# reading the branch straight off `process.env`-inherited git state for the same reason, so
+# unsetting src/git.ts's own sanitizeGitEnv() cannot reach it -- env-ci's git shell-out is not a
+# call this package makes or controls. Confirmed directly: this exact leak committed real
+# fixture-scaffold commits onto this repository's own history when `vitest run` was invoked from
+# this hook before this line existed.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_COMMON_DIR GIT_NAMESPACE
 vitest run --project unit

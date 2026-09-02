@@ -3,7 +3,7 @@ import { pathToFileURL } from 'node:url';
 import semanticRelease from 'semantic-release';
 import type { AnalyzeCommitsContext, BranchObject, BranchSpec, Commit, Options, ReleaseType } from 'semantic-release';
 import { ReleaseConfigurationError } from './errors';
-import { assertCleanWorkingTree, commitFiles, createTag, git, pushHeadAndTags, resolveCommitIdentity, workingTreeChanges } from './git';
+import { assertCleanWorkingTree, commitFiles, createTag, git, pushHeadAndTags, resolveCommitIdentity, sanitizeGitEnv, workingTreeChanges } from './git';
 import { buildDependencyGraph, mustGet, topologicalOrder, validateDependencyRangeShapes, type DependencyGraph } from './graph';
 import { writeDependencyRange } from './manifest';
 import { packageName } from './package-name';
@@ -30,7 +30,8 @@ export async function releaseWorkspaceSingleCommit(options: ReleaseWorkspaceOpti
   const root = resolve(options.root ?? process.cwd());
   const log = options.log ?? console.log;
   const dryRun = options.dryRun === true;
-  const env = options.env ?? process.env;
+  // Sanitized once here, not per call: every downstream use (semantic-release's own analysis/publish subprocess calls, and the hand-built plugin contexts in phase 5) shares this one environment, so a GIT_DIR this process itself inherited from an outer git hook cannot leak into any of them.
+  const env = sanitizeGitEnv(options.env ?? process.env);
 
   const workspace = await discoverWorkspace(root);
   const repoRoot = (await git(['rev-parse', '--show-toplevel'], { cwd: workspace.root })).trim();
