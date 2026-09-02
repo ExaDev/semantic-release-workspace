@@ -52,6 +52,22 @@ Every workspace dependency edge's range is validated against this table before t
 
 For that reason concrete ranges (which the orchestrator maintains for you) are the recommended mode. Publishing `workspace:` ranges correctly additionally requires a pack step that substitutes them, as `pnpm publish` does.
 
+## Commit strategies
+
+Everything above describes `commitStrategy: 'per-package'`, the default: unchanged, and the shape every existing consumer of this tool already sees. `commitStrategy: 'single'` is an opt-in alternative that produces exactly one commit per run instead of one commit per release plus one per dependency bump.
+
+|                     | `'per-package'` (default) | `'single'` |
+| ------------------- | ------------------------- | ---------- |
+| Commits per run      | One per package release, plus one per dependency-range bump — potentially dozens for a run that releases many packages | Exactly one, containing every version bump, every changelog write, and every dependency-range rewrite for the whole run |
+| Tags                 | Created and pushed as each package's own semantic-release run reaches its `prepare`/tag step | Created once analysis finishes for every released package, all pointing at the same combined commit, pushed together with it |
+| `@semantic-release/git` | Required in the publish plugin list for a real run (it makes the per-package commit) | Rejected outright if listed — its own `prepare` step would create exactly the per-package commit this mode exists to avoid; the combined commit is made by the orchestrator itself |
+| Default publish plugins | `DEFAULT_PUBLISH_PLUGINS` (changelog, npm, github, git) | `SINGLE_COMMIT_DEFAULT_PUBLISH_PLUGINS` — the same list minus git |
+| Crash recovery        | A bump commit already sitting in git history (from this run or an earlier one) is recognised via a machine-parseable trailer, so a run that resumes after a partial push still forces the right dependent releases | Not needed: either the whole combined commit lands and pushes, or the run fails before touching git at all, so there is never a partial push to recover from |
+
+Everything about *what* releases (topological order, forced-patch dependents, dependency-range classification, path-scoped commit analysis, unsupported-range rejection) is identical between the two modes — `commitStrategy` only changes how the result is committed, tagged, and pushed. Set it via the `--commit-strategy <mode>` CLI flag, the `commitStrategy` field in a `--config` file, or the `commitStrategy` option to `releaseWorkspace()`; omit it and nothing changes.
+
+`'single'` mode still runs each package's own configured publish plugins afterward (npm publish with provenance, GitHub releases), scoped per package exactly as `'per-package'` mode does — it just runs their `verifyConditions`/`publish`/`success` steps directly against the already-committed-and-tagged repository state, since by that point semantic-release's own top-level orchestrator would misread the tag this mode already created as an existing release. `addChannel` and `fail` are not called in this mode (pre-release channel promotion and posting an automated failure comment/issue, respectively) — a deliberate scope boundary, not a silent gap: raise an issue if your workflow needs them.
+
 ## Relationship to @qiwi/multi-semantic-release
 
 This tool exists because of [documents.js#664](https://github.com/ExaDev/documents.js/issues/664)'s research, which compared the third-party landscape — [@qiwi/multi-semantic-release](https://github.com/qiwi/multi-semantic-release) (itself a fork of [dhoulb's original](https://github.com/dhoulb/multi-semantic-release)), its successor [bulk-release](https://www.npmjs.com/package/bulk-release), and [Changesets](https://github.com/changesets/changesets) — against building in-house, and chose in-house: the org already maintains shared tooling config in exactly this shape, semantic-release's plugin lifecycle is well documented rather than proprietary, and the failure modes specific to cross-package version propagation were already understood from operating the ecosystem's existing automation ([background reading](https://dev.to/antongolub/the-chronicles-of-semantic-release-and-monorepos-5cfc)).
@@ -113,9 +129,10 @@ Run it from the workspace root (or pass `--root <directory>`). A dry run analyse
 | `--plugin <spec>` | Publish-pipeline plugin, repeatable — a module name (`@semantic-release/github`) or a JSON tuple (`'["@semantic-release/git",{"assets":["package.json"]}]'`); defaults to the standard changelog/npm/github/git pipeline |
 | `--analyze-commits <json>` | Options for the wrapped @semantic-release/commit-analyzer (e.g. `'{"preset":"conventionalcommits","releaseRules":[...]}'`) |
 | `--generate-notes <json>` | Options for the wrapped @semantic-release/release-notes-generator |
+| `--commit-strategy <mode>` | `per-package` (default) or `single` — see [Commit strategies](#commit-strategies) |
 | `--config <file>` | A config file (`.json`, `.yaml`, `.yml`, `.js`, `.cjs`, or `.ts`, loaded via [cosmiconfig](https://github.com/cosmiconfig/cosmiconfig)) providing any of the above; explicit flags win |
 
-Listing `@semantic-release/commit-analyzer` or `@semantic-release/release-notes-generator` as a `--plugin` is rejected: the orchestrator always provides those two steps itself (wrapped), so configuring them there would be a silent no-op — pass their options via `--analyze-commits`/`--generate-notes` instead. A real (non-dry) run must include `@semantic-release/git` in the pipeline, because without it nothing commits released manifests and changelogs back to the branch.
+Listing `@semantic-release/commit-analyzer` or `@semantic-release/release-notes-generator` as a `--plugin` is rejected: the orchestrator always provides those two steps itself (wrapped), so configuring them there would be a silent no-op — pass their options via `--analyze-commits`/`--generate-notes` instead. A real (non-dry) run under `commitStrategy: 'per-package'` (the default) must include `@semantic-release/git` in the pipeline, because without it nothing commits released manifests and changelogs back to the branch; `commitStrategy: 'single'` is the opposite — it rejects `@semantic-release/git` outright, since it does that committing itself (see [Commit strategies](#commit-strategies)).
 
 Note that the orchestrator sets `tagFormat`, `plugins`, `analyzeCommits`, and `generateNotes` explicitly on every per-package run, so those keys in any `release.config.*` found in the workspace are overridden by construction — configure the release through the orchestrator, not through a leftover single-package config.
 
@@ -127,6 +144,7 @@ import { releaseWorkspace } from '@exadev/semantic-release-workspace';
 const outcome = await releaseWorkspace({
   root: process.cwd(),
   dryRun: false,
+  // commitStrategy: 'per-package' is the default -- omit it entirely for today's exact behaviour.
   plugins: [
     '@semantic-release/changelog',
     '@semantic-release/npm',
@@ -141,6 +159,15 @@ for (const pkg of outcome.packages) {
 }
 ```
 
+Opting into one combined commit for the whole run (see [Commit strategies](#commit-strategies)) is the same call with `commitStrategy: 'single'` and no `@semantic-release/git` in the plugin list — omit `plugins` entirely and `SINGLE_COMMIT_DEFAULT_PUBLISH_PLUGINS` (changelog, npm, github) applies automatically:
+
+```ts
+const outcome = await releaseWorkspace({
+  root: process.cwd(),
+  commitStrategy: 'single',
+});
+```
+
 Every stage is also exported individually — `discoverWorkspace`, `buildDependencyGraph`, `topologicalOrder`, `updateDependencyRange`, `createScopedPlugins`, `filterCommitsToDirectory` — along with the error hierarchy (`WorkspaceReleaseError` and friends) so embedders can distinguish orchestration failures from unexpected crashes.
 
 ### Repository requirements
@@ -153,7 +180,7 @@ Every stage is also exported individually — `discoverWorkspace`, `buildDepende
 
 ## Status
 
-The full orchestration path — discovery, topological ordering with cycle rejection, path-scoped analysis and notes, cross-package manifest bumping with forced patch releases, and the standard publish pipeline — is implemented and exercised end to end by the test suite against real temporary git workspaces (real commits, tags, bare remotes, and semantic-release runs with the npm registry switched off), not just by unit tests of the pieces in isolation.
+The full orchestration path — discovery, topological ordering with cycle rejection, path-scoped analysis and notes, cross-package manifest bumping with forced patch releases, and the standard publish pipeline, for both commit strategies — is implemented and exercised end to end by the test suite against real temporary git workspaces (real commits, tags, bare remotes, and semantic-release runs with the npm registry switched off), not just by unit tests of the pieces in isolation.
 
 Tracked follow-up work lives in [documents.js#664](https://github.com/ExaDev/documents.js/issues/664), which also covers migrating the documents.js ecosystem's repositories onto this tool.
 
