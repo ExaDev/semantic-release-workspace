@@ -1,3 +1,19 @@
+# [1.2.0](https://github.com/ExaDev/semantic-release-workspace/compare/v1.1.7...v1.2.0) (2026-09-02)
+
+
+### Bug Fixes
+
+* **git:** strip repository-discovery env vars before spawning git subprocesses ([64c8c96](https://github.com/ExaDev/semantic-release-workspace/commit/64c8c964c42ecf45f573b5ac676484c0cf576e69))
+* sanitize GIT_DIR-style env vars passed to semantic-release, and unset them in pre-push ([bfe78a2](https://github.com/ExaDev/semantic-release-workspace/commit/bfe78a2db99f94289afe5ea7fa38ba3c6085dce3))
+
+
+### Features
+
+* add commitStrategy option with a single-combined-commit release mode ([17b386e](https://github.com/ExaDev/semantic-release-workspace/commit/17b386e4f5ba4c5176b00f5f79be407fe39ef912))
+* **cli:** add --commit-strategy flag and config field ([e449e06](https://github.com/ExaDev/semantic-release-workspace/commit/e449e0699372b8ebac881ce13bfa44be0ec9b967))
+* **git:** add tag/push/working-tree helpers for combined release commits ([d213cf8](https://github.com/ExaDev/semantic-release-workspace/commit/d213cf8f23d9880cae13bc91f3c77809b5662ece))
+* **plugins:** add single-commit default plugins, git-plugin rejection, and a commit-capture hook ([c276a73](https://github.com/ExaDev/semantic-release-workspace/commit/c276a73044c6443dd2ef01ce2465154b89365aab))
+
 ## [1.1.7](https://github.com/ExaDev/semantic-release-workspace/compare/v1.1.6...v1.1.7) (2026-09-02)
 
 ## [1.1.6](https://github.com/ExaDev/semantic-release-workspace/compare/v1.1.5...v1.1.6) (2026-09-01)
