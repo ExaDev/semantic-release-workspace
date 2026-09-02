@@ -16,6 +16,7 @@ export {
   filterCommitsToDirectory,
   resolvePublishPlugins,
   DEFAULT_PUBLISH_PLUGINS,
+  SINGLE_COMMIT_DEFAULT_PUBLISH_PLUGINS,
   type DependencyBump,
   type DependencyBumpSource,
   type PublishPluginSpec,
@@ -24,6 +25,7 @@ export {
 } from './plugins';
 export {
   releaseWorkspace,
+  type CommitStrategy,
   type ReleaseWorkspaceOptions,
   type WorkspaceReleaseOutcome,
   type PackageReleaseOutcome,

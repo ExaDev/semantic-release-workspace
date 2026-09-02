@@ -98,6 +98,29 @@ describe('releaseWorkspace against a real git workspace', () => {
     }
   }, 240_000);
 
+  it('behaves identically whether commitStrategy is omitted or explicitly set to "per-package"', async () => {
+    const fixture = await createWorkspaceFixture(chainPackages, [
+      { message: 'feat(a): second feature', files: { 'packages/a/src/index.js': 'export const a = 2;\n' } },
+    ]);
+    try {
+      const outcome = await releaseWorkspace({ root: fixture.root, env: releaseEnv(), plugins: FIXTURE_PLUGINS, commitStrategy: 'per-package' });
+
+      // Same shape and versions as the very first test's implicit-default run: one commit per release plus one per dependency bump, not the "single" strategy's one combined commit.
+      const byName = new Map(outcome.packages.map((pkg) => [pkg.name, pkg]));
+      expect(byName.get('@fixture/a')).toMatchObject({ released: true, version: '1.1.0', type: 'minor' });
+      expect(byName.get('@fixture/b')).toMatchObject({ released: true, version: '1.0.1', type: 'patch' });
+      expect(byName.get('@fixture/c')).toMatchObject({ released: true, version: '1.0.1', type: 'patch' });
+
+      // Four release/bump commits landed on top of the fixture's own scaffolding (a's release, b's bump, b's release, c's bump, c's release -- five, not one), each pushed separately, exactly as when commitStrategy is left unset.
+      const bumpLog = await git(['log', '--format=%s', '--grep=^chore(deps):', 'main'], { cwd: fixture.root });
+      expect(bumpLog.split('\n').filter(Boolean)).toHaveLength(2);
+      const releaseLog = await git(['log', '--format=%s', '--grep=^chore(release):', 'main'], { cwd: fixture.root });
+      expect(releaseLog.split('\n').filter(Boolean)).toHaveLength(3);
+    } finally {
+      await fixture.remove();
+    }
+  }, 240_000);
+
   it('finds nothing to release on a second run over already-released state', async () => {
     const fixture = await createWorkspaceFixture(chainPackages, [
       { message: 'feat(a): second feature', files: { 'packages/a/src/index.js': 'export const a = 2;\n' } },
