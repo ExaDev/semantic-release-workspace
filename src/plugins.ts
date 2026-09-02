@@ -43,6 +43,9 @@ export const DEFAULT_PUBLISH_PLUGINS: readonly PublishPluginSpec[] = [
   ],
 ];
 
+/** The standard publish pipeline for `commitStrategy: 'single'`: the same as `DEFAULT_PUBLISH_PLUGINS` minus @semantic-release/git, which that mode never runs -- see `resolvePublishPlugins`'s `forbidGitPlugin` option for why it is rejected outright rather than merely unused. Single-commit mode does its own committing (one combined commit for every released package), so a `prepare`-step git plugin here would create the very per-package commits that mode exists to avoid. */
+export const SINGLE_COMMIT_DEFAULT_PUBLISH_PLUGINS: readonly PublishPluginSpec[] = ['@semantic-release/changelog', '@semantic-release/npm', '@semantic-release/github'];
+
 const STEP_PLUGINS_THE_ORCHESTRATOR_OWNS: ReadonlySet<string> = new Set(['@semantic-release/commit-analyzer', '@semantic-release/release-notes-generator']);
 
 export interface ScopedPlugins {
@@ -62,6 +65,8 @@ export function createScopedPlugins(scope: {
   readonly analyzeCommitsConfig: Record<string, unknown>;
   readonly generateNotesConfig: Record<string, unknown>;
   readonly bumps: DependencyBumpSource;
+  /** Called with the path-filtered commit list every time this package's commits are resolved (from either step, whichever runs first). Optional: `commitStrategy: 'single'` uses it to capture the same filtered list `success()`'s GitHub plugin step needs later, without recomputing `changedPathsSince`/`filterCommitsToDirectory` itself from the outside. */
+  readonly onCommitsResolved?: (commits: readonly Commit[]) => void;
 }): ScopedPlugins {
   // One `git log --name-only` pass per release range, shared between the analyzeCommits and generateNotes steps (semantic-release calls both with the same lastRelease base; notes regeneration after a prepare-plugin commit reuses the cached range because the analysis list itself does not change).
   let cached: { readonly from: string | undefined; readonly paths: Promise<Map<string, ReadonlySet<string>>> } | undefined;
@@ -75,7 +80,9 @@ export function createScopedPlugins(scope: {
     } else if (cached.from !== from) {
       cached = { from, paths: changedPathsSince(from, { cwd: context.cwd }) };
     }
-    return filterCommitsToDirectory(context.commits, await cached.paths, scope.pkg.repoRelativeDirectory);
+    const commits = filterCommitsToDirectory(context.commits, await cached.paths, scope.pkg.repoRelativeDirectory);
+    scope.onCommitsResolved?.(commits);
+    return commits;
   }
 
   return {
@@ -157,7 +164,7 @@ export type ResolvedPublishPlugin = [string, Record<string, unknown>];
 export function resolvePublishPlugins(
   specs: readonly PublishPluginSpec[],
   workspaceRoot: string,
-  options: { readonly requireGitPlugin: boolean },
+  options: { readonly requireGitPlugin: boolean; readonly forbidGitPlugin?: boolean },
 ): readonly ResolvedPublishPlugin[] {
   const requireFromTool = createRequire(import.meta.url);
   const requireFromWorkspace = createRequire(resolve(workspaceRoot, 'package.json'));
@@ -173,6 +180,11 @@ export function resolvePublishPlugins(
     }
     if (name === '@semantic-release/git') {
       hasGitPlugin = true;
+      if (options.forbidGitPlugin === true) {
+        throw new ReleaseConfigurationError(
+          `"@semantic-release/git" is listed as a publish plugin, but commitStrategy "single" does its own committing -- one combined commit for every released package, tagged once every package has been analysed -- rather than letting each package's own release commit itself. Remove @semantic-release/git from the plugin list; its version bump and changelog write still happen (via its sibling prepare plugins), just folded into the combined commit instead of made on their own.`,
+        );
+      }
     }
     const entry: ResolvedPublishPlugin = [resolvePluginModule(name, requireFromTool, requireFromWorkspace), config];
     resolved.push(entry);
