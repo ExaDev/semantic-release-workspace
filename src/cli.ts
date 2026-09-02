@@ -6,10 +6,15 @@ import { version } from '../package.json';
 import { WorkspaceReleaseError } from './errors';
 import { isJsonObject, isStringArray, isUnknownArray } from './json';
 import { packageName } from './package-name';
-import { DEFAULT_PUBLISH_PLUGINS, type PublishPluginSpec } from './plugins';
-import { releaseWorkspace, type PackageReleaseOutcome } from './release';
+import { type PublishPluginSpec } from './plugins';
+import { releaseWorkspace, type CommitStrategy, type PackageReleaseOutcome } from './release';
 
-const CONFIG_OPTION_KEYS: ReadonlySet<string> = new Set(['dryRun', 'branches', 'plugins', 'analyzeCommits', 'generateNotes']);
+const CONFIG_OPTION_KEYS: ReadonlySet<string> = new Set(['dryRun', 'branches', 'plugins', 'analyzeCommits', 'generateNotes', 'commitStrategy']);
+const COMMIT_STRATEGIES: ReadonlySet<string> = new Set<CommitStrategy>(['per-package', 'single']);
+
+function isCommitStrategy(value: string): value is CommitStrategy {
+  return COMMIT_STRATEGIES.has(value);
+}
 
 /**
  * Builds the commander program but never parses argv or exits the process itself in construction, so the command tree stays testable in isolation. `release` is the orchestration entry point: discover the workspace, order it topologically, and run semantic-release per package.
@@ -33,12 +38,24 @@ export function createProgram(): Command {
   release.option('--analyze-commits <json>', 'options for the wrapped @semantic-release/commit-analyzer, as a JSON object');
   release.option('--generate-notes <json>', 'options for the wrapped @semantic-release/release-notes-generator, as a JSON object');
   release.option(
+    '--commit-strategy <mode>',
+    'how the run commits its released changes: "per-package" (default; today\'s behaviour, one commit per release plus one per dependency bump) or "single" (one combined commit for the whole run, tagged once per released package)',
+    parseCommitStrategy,
+  );
+  release.option(
     '--config <file>',
-    'config file (.json, .yaml, .yml, .js, .cjs, or .ts) providing any of the release options (dryRun, branches, plugins, analyzeCommits, generateNotes); explicit flags win',
+    'config file (.json, .yaml, .yml, .js, .cjs, or .ts) providing any of the release options (dryRun, branches, plugins, analyzeCommits, generateNotes, commitStrategy); explicit flags win',
   );
   release.action(runRelease);
 
   return program;
+}
+
+function parseCommitStrategy(value: string): CommitStrategy {
+  if (!isCommitStrategy(value)) {
+    throw new InvalidArgumentError(`--commit-strategy must be one of: ${[...COMMIT_STRATEGIES].join(', ')}`);
+  }
+  return value;
 }
 
 interface ReleaseFlags {
@@ -48,10 +65,18 @@ interface ReleaseFlags {
   readonly plugin: string[];
   readonly analyzeCommits: string | undefined;
   readonly generateNotes: string | undefined;
+  readonly commitStrategy: CommitStrategy | undefined;
   readonly config: string | undefined;
 }
 
-const NO_CONFIG_FILE: ReleaseConfigFile = { dryRun: undefined, branches: undefined, plugins: undefined, analyzeCommits: undefined, generateNotes: undefined };
+const NO_CONFIG_FILE: ReleaseConfigFile = {
+  dryRun: undefined,
+  branches: undefined,
+  plugins: undefined,
+  analyzeCommits: undefined,
+  generateNotes: undefined,
+  commitStrategy: undefined,
+};
 
 async function runRelease(flags: ReleaseFlags): Promise<void> {
   const file = flags.config === undefined ? NO_CONFIG_FILE : readReleaseConfigFile(flags.config);
@@ -59,10 +84,11 @@ async function runRelease(flags: ReleaseFlags): Promise<void> {
     root: flags.root,
     dryRun: flags.dryRun ?? (file.dryRun === true ? true : undefined),
     branches: flags.branches.length > 0 ? flags.branches : file.branches,
-    plugins:
-      flags.plugin.length > 0 ? flags.plugin.map((spec) => parsePluginSpec(spec)) : (file.plugins ?? DEFAULT_PUBLISH_PLUGINS),
+    // No `?? DEFAULT_PUBLISH_PLUGINS` fallback here: which default plugin list applies depends on commitStrategy (git is part of the default for "per-package", forbidden for "single"), so an unset `plugins` is passed straight through and `releaseWorkspace` picks the right default for whichever strategy is in effect.
+    plugins: flags.plugin.length > 0 ? flags.plugin.map((spec) => parsePluginSpec(spec)) : file.plugins,
     analyzeCommits: flags.analyzeCommits === undefined ? file.analyzeCommits : parseJsonObjectFlag(flags.analyzeCommits, '--analyze-commits'),
     generateNotes: flags.generateNotes === undefined ? file.generateNotes : parseJsonObjectFlag(flags.generateNotes, '--generate-notes'),
+    commitStrategy: flags.commitStrategy ?? file.commitStrategy,
   });
 
   for (const pkg of outcome.packages) {
@@ -120,6 +146,7 @@ export interface ReleaseConfigFile {
   readonly plugins: readonly PublishPluginSpec[] | undefined;
   readonly analyzeCommits: Record<string, unknown> | undefined;
   readonly generateNotes: Record<string, unknown> | undefined;
+  readonly commitStrategy: CommitStrategy | undefined;
 }
 
 // A single loader instance would carry cosmiconfig's own load cache across every --config read, which never helps here (the CLI reads a given path at most once per process) and would be a stale-cache hazard for the one thing that does invoke this function repeatedly: this file's own test suite loading many different fixture paths in one process.
@@ -148,7 +175,7 @@ export function readReleaseConfigFile(path: string): ReleaseConfigFile {
     }
   }
 
-  const { dryRun, branches, plugins, analyzeCommits, generateNotes } = parsed;
+  const { dryRun, branches, plugins, analyzeCommits, generateNotes, commitStrategy } = parsed;
   if (dryRun !== undefined && typeof dryRun !== 'boolean') {
     throw new InvalidArgumentError(`--config file ${path}: "dryRun" must be a boolean`);
   }
@@ -164,6 +191,9 @@ export function readReleaseConfigFile(path: string): ReleaseConfigFile {
   if (generateNotes !== undefined && !isJsonObject(generateNotes)) {
     throw new InvalidArgumentError(`--config file ${path}: "generateNotes" must be an object`);
   }
+  if (commitStrategy !== undefined && (typeof commitStrategy !== 'string' || !isCommitStrategy(commitStrategy))) {
+    throw new InvalidArgumentError(`--config file ${path}: "commitStrategy" must be one of: ${[...COMMIT_STRATEGIES].join(', ')}`);
+  }
 
   return {
     dryRun,
@@ -171,6 +201,7 @@ export function readReleaseConfigFile(path: string): ReleaseConfigFile {
     plugins: plugins === undefined ? undefined : plugins.map((spec) => parseConfigFilePlugin(spec, path)),
     analyzeCommits,
     generateNotes,
+    commitStrategy,
   };
 }
 

@@ -80,6 +80,22 @@ describe('readReleaseConfigFile', () => {
     expect(() => readReleaseConfigFile(path)).toThrow(/unknown option/);
   });
 
+  it('reads a commitStrategy of "single"', async () => {
+    const path = await temporaryConfigFile('release.config.json', JSON.stringify({ commitStrategy: 'single' }));
+    expect(readReleaseConfigFile(path).commitStrategy).toBe('single');
+  });
+
+  it('leaves commitStrategy undefined when the config file omits it, so releaseWorkspace applies its own "per-package" default', async () => {
+    const path = await temporaryConfigFile('release.config.json', JSON.stringify({ dryRun: true }));
+    expect(readReleaseConfigFile(path).commitStrategy).toBeUndefined();
+  });
+
+  it('rejects a commitStrategy that is not "per-package" or "single"', async () => {
+    const path = await temporaryConfigFile('release.config.json', JSON.stringify({ commitStrategy: 'per-commit' }));
+    expect(() => readReleaseConfigFile(path)).toThrow(InvalidArgumentError);
+    expect(() => readReleaseConfigFile(path)).toThrow(/"commitStrategy" must be one of/);
+  });
+
   it('rejects a missing config file', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'semantic-release-workspace-cli-'));
     temporaryDirectories.push(directory);
