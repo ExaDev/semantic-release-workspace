@@ -1,5 +1,6 @@
-import { DependencyCycleError } from './errors';
+import { DependencyCycleError, WorkspaceReleaseError } from './errors';
 import { type DependencyField } from './manifest';
+import { classifyDependencyRange } from './version-range';
 import { type WorkspacePackage } from './workspace';
 
 /** One package's dependency on another package in the same workspace. */
@@ -113,4 +114,28 @@ function firstUnplacedDependency(name: string | undefined, graph: DependencyGrap
   }
   const edges = graph.dependencies.get(name) ?? [];
   return edges.map((edge) => edge.dependency).filter((dependency) => unplaced.has(dependency)).sort()[0];
+}
+
+/**
+ * Checks every workspace dependency edge's range shape before anything releases, so an `UnsupportedDependencyRangeError` stops a run before the first publish rather than after some sibling has already been published, tagged, committed, and pushed. The shape a range supports depends only on the range text itself (see `classifyDependencyRange`), never on which version a sibling ends up releasing, so this can run once up front for the whole graph instead of only being discovered edge by edge as each dependency happens to release.
+ *
+ * Shared by both commit strategies (`release.ts`'s per-package loop and `single-commit-release.ts`'s analysis phase), which is why it lives alongside the graph it validates rather than inside either strategy's own module.
+ */
+export function validateDependencyRangeShapes(graph: DependencyGraph): void {
+  for (const edges of graph.dependencies.values()) {
+    for (const edge of edges) {
+      classifyDependencyRange(edge.range);
+    }
+  }
+}
+
+/**
+ * Looks up a value the caller already knows must be present -- a package or edge the topological order or graph just produced -- throwing rather than returning `undefined` if it somehow is not. An internal-consistency guard, not a user-facing validation, so both commit strategies share it rather than each carrying its own copy.
+ */
+export function mustGet<T>(map: ReadonlyMap<string, T>, key: string, what: string): T {
+  const value = map.get(key);
+  if (value === undefined) {
+    throw new WorkspaceReleaseError(`Internal error: ${what} "${key}" disappeared from the dependency graph mid-run.`);
+  }
+  return value;
 }

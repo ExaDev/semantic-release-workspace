@@ -4,7 +4,7 @@ import type { BranchSpec, Options, Result } from 'semantic-release';
 import { formatDependencyBumpMessage } from './dependency-bump-commit';
 import { WorkspaceReleaseError } from './errors';
 import { commitFiles, pushHead, resolveCommitIdentity, type CommitIdentity } from './git';
-import { buildDependencyGraph, topologicalOrder, type DependencyGraph } from './graph';
+import { buildDependencyGraph, mustGet, topologicalOrder, validateDependencyRangeShapes, type DependencyGraph } from './graph';
 import { packageName } from './package-name';
 import {
   type DependencyBump,
@@ -16,8 +16,17 @@ import {
 } from './plugins';
 import { type DependencyField, writeDependencyRange } from './manifest';
 import { regenerateLockfile } from './pnpm';
-import { classifyDependencyRange, updateDependencyRange } from './version-range';
+import { updateDependencyRange } from './version-range';
 import { discoverWorkspace, type Workspace, type WorkspacePackage } from './workspace';
+import { releaseWorkspaceSingleCommit } from './single-commit-release';
+
+/**
+ * How a run commits its released changes:
+ *
+ * - `'per-package'` (the default): today's behaviour, unchanged. Each package's own semantic-release run commits, tags, and pushes itself the moment it releases, and each cross-package dependency bump is its own immediately-pushed commit. This is the byte-for-byte pre-existing behaviour of this package and stays the default so no existing consumer's release history changes shape without opting in.
+ * - `'single'`: every package's version bump, changelog, and dependency-range rewrite for the whole run is folded into one combined commit, tagged once per released package (all tags pointing at that one commit), pushed once. Publish-pipeline steps (npm, GitHub) still run per package afterward, scoped to the already-committed-and-tagged state. See `single-commit-release.ts` for the full design.
+ */
+export type CommitStrategy = 'per-package' | 'single';
 
 export interface ReleaseWorkspaceOptions {
   /** Directory holding the workspace's `pnpm-workspace.yaml`. Defaults to the process working directory. */
@@ -28,7 +37,7 @@ export interface ReleaseWorkspaceOptions {
   readonly dryRun?: boolean;
   /** Release branch configuration for semantic-release. Defaults to semantic-release's own default branch list. */
   readonly branches?: readonly BranchSpec[];
-  /** Publish-pipeline plugins (changelog, npm, GitHub, git), each scoped per package by semantic-release's own `cwd`. Defaults to the standard pipeline in DEFAULT_PUBLISH_PLUGINS. */
+  /** Publish-pipeline plugins (changelog, npm, GitHub, git), each scoped per package by semantic-release's own `cwd`. Defaults to the standard pipeline in DEFAULT_PUBLISH_PLUGINS for `commitStrategy: 'per-package'`, or SINGLE_COMMIT_DEFAULT_PUBLISH_PLUGINS (the same list minus @semantic-release/git) for `commitStrategy: 'single'`. */
   readonly plugins?: readonly PublishPluginSpec[];
   /** Options for the wrapped @semantic-release/commit-analyzer, applied per package after path filtering. */
   readonly analyzeCommits?: Record<string, unknown>;
@@ -36,6 +45,8 @@ export interface ReleaseWorkspaceOptions {
   readonly generateNotes?: Record<string, unknown>;
   /** Progress sink for the orchestrator's own narration (semantic-release logs its own detail). Defaults to `console.log`. */
   readonly log?: (message: string) => void;
+  /** How the run commits its released changes. Defaults to `'per-package'`, today's exact existing behaviour. See `CommitStrategy` for what each mode does. */
+  readonly commitStrategy?: CommitStrategy;
 }
 
 /** One dependency-range change applied to a dependent package's manifest during the run, attached to the dependent's own outcome. */
@@ -69,6 +80,10 @@ export interface WorkspaceReleaseOutcome {
  * For each package, in topological order: run semantic-release's programmatic API with `cwd` scoped to the package directory, a `name@version` tag format to keep each package's tags distinct in the one shared tag namespace, and inline `analyzeCommits`/`generateNotes` plugins that filter the release range's commits down to the package's own directory before delegating to the standard plugins. When a package releases, every workspace package that depends on it and has not run yet gets its dependency range rewritten in its manifest and committed immediately -- before its own turn, so its commit analysis and its published manifest both see the new range.
  */
 export async function releaseWorkspace(options: ReleaseWorkspaceOptions = {}): Promise<WorkspaceReleaseOutcome> {
+  if ((options.commitStrategy ?? 'per-package') === 'single') {
+    return releaseWorkspaceSingleCommit(options);
+  }
+
   const root = resolve(options.root ?? process.cwd());
   const log = options.log ?? console.log;
   const dryRun = options.dryRun === true;
@@ -132,17 +147,6 @@ export async function releaseWorkspace(options: ReleaseWorkspaceOptions = {}): P
   }
 
   return { order, packages: outcomes };
-}
-
-/**
- * Checks every workspace dependency edge's range shape before anything releases, so an `UnsupportedDependencyRangeError` stops the run before the first publish rather than after some sibling has already been published, tagged, committed, and pushed. The shape a range supports depends only on the range text itself (see `classifyDependencyRange`), never on which version a sibling ends up releasing, so this can run once up front for the whole graph instead of only being discovered edge by edge as each dependency happens to release.
- */
-function validateDependencyRangeShapes(graph: DependencyGraph): void {
-  for (const edges of graph.dependencies.values()) {
-    for (const edge of edges) {
-      classifyDependencyRange(edge.range);
-    }
-  }
 }
 
 async function runPackageRelease(pkg: WorkspacePackage, options: {
@@ -243,10 +247,3 @@ async function bumpDependents(released: WorkspacePackage, version: string, graph
   return applied;
 }
 
-function mustGet<T>(map: ReadonlyMap<string, T>, key: string, what: string): T {
-  const value = map.get(key);
-  if (value === undefined) {
-    throw new WorkspaceReleaseError(`Internal error: ${what} "${key}" disappeared from the dependency graph mid-run.`);
-  }
-  return value;
-}
