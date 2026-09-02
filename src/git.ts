@@ -107,6 +107,51 @@ export async function pushHead(options: GitCommandOptions): Promise<void> {
   await git(['push', 'origin', `HEAD:${branch}`], options);
 }
 
+/** Creates a lightweight tag (`git tag <name> <ref>`, no annotation) at the given commit -- the same form semantic-release's own core creates its release tags with (see its `lib/git.js`), so a tag this tool creates directly is indistinguishable from one semantic-release would have made itself. */
+export async function createTag(name: string, ref: string, options: GitCommandOptions): Promise<void> {
+  await git(['tag', name, ref], options);
+}
+
+/**
+ * Lists every path with a working-tree or index change (modified, added, deleted, untracked), repository-root-relative, via `git status --porcelain=v1 -z`. `commitStrategy: 'single'` uses this rather than predicting which files each configured prepare plugin touched (a version bump, a changelog write, a dependency-range rewrite, a regenerated lockfile) by name: asking git what actually changed is correct regardless of which prepare plugins are configured or how they name their own output files.
+ *
+ * `-z` NUL-terminates every field so a path containing a space or newline cannot be misread as two paths; a rename or copy (status codes `R`/`C`) carries two NUL-terminated fields (the new path first, then the origin path), so it consumes two tokens instead of one.
+ */
+export async function workingTreeChanges(options: GitCommandOptions): Promise<readonly string[]> {
+  const output = await git(['status', '--porcelain=v1', '--untracked-files=all', '-z'], options);
+  const tokens = output.split('\0').filter((token) => token !== '');
+  const paths: string[] = [];
+  for (let index = 0; index < tokens.length; index += 1) {
+    const entry = tokens[index];
+    if (entry === undefined || entry.length < 4) {
+      continue;
+    }
+    const statusCode = entry.slice(0, 2);
+    paths.push(entry.slice(3));
+    if (statusCode.includes('R') || statusCode.includes('C')) {
+      // The origin path of a rename/copy occupies the next token; it names a path that no longer exists (or, for a copy, is unrelated to the new content) and must not be added as if it were itself changed content to commit.
+      index += 1;
+    }
+  }
+  return paths;
+}
+
+/** Fails loudly if the working tree is not clean, rather than silently folding pre-existing, unrelated dirty state into a release commit. `commitStrategy: 'single'` calls this before it starts, since it relies on `workingTreeChanges` to discover exactly what its own run touches. */
+export async function assertCleanWorkingTree(options: GitCommandOptions): Promise<void> {
+  const changes = await workingTreeChanges(options);
+  if (changes.length > 0) {
+    throw new WorkspaceStateError(
+      `The working tree in ${options.cwd} is not clean: ${changes.join(', ')}. commitStrategy "single" discovers what it touched via "git status", so it requires a clean tree to start from; commit, stash elsewhere, or discard these changes first.`,
+    );
+  }
+}
+
+/** Pushes the current branch's head and a set of tags to origin in one push, so a combined release commit and every tag pointing at it land on the remote as a single atomic-looking update rather than as separate pushes an interrupted run could split across. */
+export async function pushHeadAndTags(tagNames: readonly string[], options: GitCommandOptions): Promise<void> {
+  const branch = await currentBranch(options);
+  await git(['push', 'origin', `HEAD:${branch}`, ...tagNames], options);
+}
+
 function toGitCommandError(args: readonly string[], cwd: string, cause: unknown): GitCommandError {
   const exitCode = cause instanceof Error && 'code' in cause && typeof cause.code === 'number' ? cause.code : undefined;
   const stderr = cause instanceof Error && 'stderr' in cause && typeof cause.stderr === 'string' ? cause.stderr.trim() : '';
