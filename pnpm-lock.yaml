@@ -38,7 +38,7 @@ importers:
         version: 10.0.1(eslint@10.9.1(jiti@2.6.1))
       '@exadev/eslint-config':
         specifier: ^2.1.1
-        version: 2.1.2(eslint@10.9.1(jiti@2.6.1))(typescript-eslint@8.68.0(eslint@10.9.1(jiti@2.6.1))(typescript@6.0.3))
+        version: 2.9.1(eslint@10.9.1(jiti@2.6.1))(typescript-eslint@8.68.0(eslint@10.9.1(jiti@2.6.1))(typescript@6.0.3))(typescript@6.0.3)
       '@semantic-release/changelog':
         specifier: ^7.0.0
         version: 7.0.0(semantic-release@25.0.9(typescript@6.0.3))
@@ -288,11 +288,12 @@ packages:
     resolution: {integrity: sha512-+CNAzxglkrpNf/kKywqQfk74QjtceuOE7Qm+AF8miRvPF/wmmK5+OJOgVh3AVTT3RP2mH3+FOaxlE5v72owk0A==}
     engines: {node: ^20.19.0 || ^22.13.0 || >=24}
 
-  '@exadev/eslint-config@2.1.2':
-    resolution: {integrity: sha512-isLVdlJ10wPn+O6iHAUQf+UQAfHvlaOfQYQVM2mUoPXsxKnDn66EvgFdWJUM9FrI/iFRI+bGzm3FfYJu/N+DTg==}
+  '@exadev/eslint-config@2.9.1':
+    resolution: {integrity: sha512-JXzkrGLsmsldEPrbfLPq+dEqZ9eYOPGr0IZ3S6H7wS3AjPwxCW2uxpFs3tDvEL3zAxIeKE3sNNIm6DDxZ6S/3w==}
     engines: {node: '>=20'}
     peerDependencies:
       eslint: '>=10.0.0'
+      typescript: '>=4.8.4'
       typescript-eslint: '>=8.0.0'
 
   '@humanfs/core@0.19.2':
@@ -2954,10 +2955,15 @@ snapshots:
       '@eslint/core': 1.2.1
       levn: 0.4.1
 
-  '@exadev/eslint-config@2.1.2(eslint@10.9.1(jiti@2.6.1))(typescript-eslint@8.68.0(eslint@10.9.1(jiti@2.6.1))(typescript@6.0.3))':
+  '@exadev/eslint-config@2.9.1(eslint@10.9.1(jiti@2.6.1))(typescript-eslint@8.68.0(eslint@10.9.1(jiti@2.6.1))(typescript@6.0.3))(typescript@6.0.3)':
     dependencies:
+      '@typescript-eslint/utils': 8.68.0(eslint@10.9.1(jiti@2.6.1))(typescript@6.0.3)
       eslint: 10.9.1(jiti@2.6.1)
+      ts-api-utils: 2.5.0(typescript@6.0.3)
+      typescript: 6.0.3
       typescript-eslint: 8.68.0(eslint@10.9.1(jiti@2.6.1))(typescript@6.0.3)
+    transitivePeerDependencies:
+      - supports-color
 
   '@humanfs/core@0.19.2':
     dependencies:
