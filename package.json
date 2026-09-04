@@ -1,6 +1,6 @@
 {
   "name": "@exadev/semantic-release-workspace",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "Independent per-package semantic-release orchestration for pnpm workspaces, without lockstep versioning.",
   "type": "module",
   "repository": {
