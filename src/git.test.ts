@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { GitCommandError, WorkspaceStateError } from './errors';
-import { changedPathsSince, currentBranch, git, pushHead, resolveCommitIdentity } from './git';
+import { changedPathsSince, createTag, currentBranch, git, pushHead, pushHeadAndTags, resolveCommitIdentity } from './git';
 import { createWorkspaceFixture } from './git-workspace-fixture';
 
 /** One package is enough for every git-level behaviour here: these tests are about the repository, not about the workspace's shape. */
@@ -42,6 +42,36 @@ describe('pushHead', () => {
       await fixture.remove();
     }
   });
+});
+
+describe('pushHeadAndTags', () => {
+  it('leaves no tag on the remote when the branch update it must land with is rejected as a non-fast-forward', async () => {
+    const fixture = await createWorkspaceFixture(onePackage, []);
+    try {
+      // A second clone races this one: it commits and pushes to origin/main first, so this fixture's own upcoming `HEAD:main` push is a stale, non-fast-forward update -- exactly what happens when an ordinary PR merges to main while a `commitStrategy: 'single'` release run is still between its own local commit and its final push.
+      const race = await createWorkspaceFixture(onePackage, []);
+      await git(['remote', 'set-url', 'origin', (await git(['remote', 'get-url', 'origin'], { cwd: fixture.root })).trim()], { cwd: race.root });
+      await git(['fetch', 'origin'], { cwd: race.root });
+      await git(['reset', '--hard', 'origin/main'], { cwd: race.root });
+      await git(['commit', '--allow-empty', '-m', 'feat: a concurrent, unrelated merge to main'], { cwd: race.root });
+      await git(['push', 'origin', 'HEAD:main'], { cwd: race.root });
+      await race.remove();
+
+      // This fixture's own local commit and tag are now built on a main that origin has already moved past.
+      await git(['commit', '--allow-empty', '-m', 'chore(release): batch release [skip ci]'], { cwd: fixture.root });
+      const staleSha = (await git(['rev-parse', 'HEAD'], { cwd: fixture.root })).trim();
+      await createTag('@fixture/only@1.1.0', staleSha, { cwd: fixture.root });
+
+      await expect(pushHeadAndTags(['@fixture/only@1.1.0'], { cwd: fixture.root })).rejects.toBeInstanceOf(GitCommandError);
+
+      // The whole point: a rejected branch update must take the tag down with it. Landing the tag anyway would leave a permanently orphaned ref -- nothing points at it from main, yet its name is now taken forever, so every future run that (correctly, deterministically) recomputes the same next version for this package fails re-creating the same tag, on every single run, with no way to self-heal.
+      const remoteTags = await git(['ls-remote', '--tags', 'origin'], { cwd: fixture.root });
+      expect(remoteTags).not.toContain('@fixture/only@1.1.0');
+    } finally {
+      await fixture.remove();
+    }
+    // 20s, not the file's default: two full workspace fixtures (each its own git init, bare remote, and initial push) run here, tight against the default budget under the disk and process contention a full concurrent suite run adds.
+  }, 20_000);
 });
 
 describe('resolveCommitIdentity', () => {

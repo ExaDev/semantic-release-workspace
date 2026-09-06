@@ -175,10 +175,10 @@ export async function assertCleanWorkingTree(options: GitCommandOptions): Promis
   }
 }
 
-/** Pushes the current branch's head and a set of tags to origin in one push, so a combined release commit and every tag pointing at it land on the remote as a single atomic-looking update rather than as separate pushes an interrupted run could split across. */
+/** Pushes the current branch's head and a set of tags to origin as one atomic update: either every ref lands or none do. `--atomic` is load-bearing, not cosmetic -- a plain multi-refspec `git push` negotiates each ref independently, so a branch update the remote rejects (e.g. a non-fast-forward, because an ordinary PR merged to this branch while this run was still preparing its own commit) can still let the tag refs through, since a brand-new tag has no fast-forward constraint to fail. That leaves a tag on the remote with no commit reachable from the branch behind it -- and because the release this tag names gets recomputed identically, deterministically, from the branch's own commit history on every future run, a stranded tag is not a one-off failure: it is a permanent block, since `git tag <name>` refuses to recreate a name that already exists. Atomicity turns a silent partial success into a clean, retriable failure: the branch and its tags either both advance together, or neither does, so a rejected push leaves nothing behind for the next run to trip over. */
 export async function pushHeadAndTags(tagNames: readonly string[], options: GitCommandOptions): Promise<void> {
   const branch = await currentBranch(options);
-  await git(['push', 'origin', `HEAD:${branch}`, ...tagNames], options);
+  await git(['push', '--atomic', 'origin', `HEAD:${branch}`, ...tagNames], options);
 }
 
 function toGitCommandError(args: readonly string[], cwd: string, cause: unknown): GitCommandError {
