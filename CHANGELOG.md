@@ -1,3 +1,10 @@
+## [1.2.3](https://github.com/ExaDev/semantic-release-workspace/compare/v1.2.2...v1.2.3) (2026-09-06)
+
+
+### Bug Fixes
+
+* **git:** push a combined release commit and its tags atomically ([2bc9b1d](https://github.com/ExaDev/semantic-release-workspace/commit/2bc9b1d88243aa7aa0037ad851db027a507c2d7c))
+
 ## [1.2.2](https://github.com/ExaDev/semantic-release-workspace/compare/v1.2.1...v1.2.2) (2026-09-04)
 
 ## [1.2.1](https://github.com/ExaDev/semantic-release-workspace/compare/v1.2.0...v1.2.1) (2026-09-03)
