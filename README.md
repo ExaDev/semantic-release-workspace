@@ -68,6 +68,78 @@ Everything about *what* releases (topological order, forced-patch dependents, de
 
 `'single'` mode still runs each package's own configured publish plugins afterward (npm publish with provenance, GitHub releases), scoped per package exactly as `'per-package'` mode does — it just runs their `verifyConditions`/`publish`/`success` steps directly against the already-committed-and-tagged repository state, since by that point semantic-release's own top-level orchestrator would misread the tag this mode already created as an existing release. `addChannel` and `fail` are not called in this mode (pre-release channel promotion and posting an automated failure comment/issue, respectively) — a deliberate scope boundary, not a silent gap: raise an issue if your workflow needs them.
 
+## Gating publish
+
+`commitStrategy` changes how a release is committed; `gatePublish` changes *when* it gets published relative to being tagged and pushed -- a different, orthogonal axis. With `gatePublish: true`, each due package is tagged and pushed via [@exadev/release-gate](https://www.npmjs.com/package/@exadev/release-gate) (a real dependency of this package -- no separate install needed) but never published: nothing calls `npm publish`, creates a GitHub Release, or runs any other configured publish step, until a separate `resume` step does so explicitly -- from the same process, or a completely different one (a later CI job, once a deploy or smoke test has confirmed the release should actually go out).
+
+Rejected outright combined with `commitStrategy: 'single'`: that mode's tag/publish machinery is entirely bespoke and never goes through semantic-release's own `run()` (see [Commit strategies](#commit-strategies) above), so it has no insertion point for `release-gate`'s detach/resume primitives.
+
+Two-step CI example -- tag in one job, publish once a gate has passed in a later one:
+
+```yaml
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version-file: .node-version }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec semantic-release-workspace release --gate-publish --gate-state-file gate-state.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/upload-artifact@v4
+        with: { name: gate-state, path: gate-state.json }
+
+  deploy-and-verify:
+    needs: tag
+    runs-on: ubuntu-latest
+    steps:
+      - run: ./deploy-and-smoke-test.sh # whatever the actual gate is
+
+  publish:
+    needs: deploy-and-verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version-file: .node-version }
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@v4
+        with: { name: gate-state }
+      - run: pnpm exec semantic-release-workspace resume --gate-state-file gate-state.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_CONFIG_PROVENANCE: 'true'
+```
+
+The programmatic equivalent, run in the same process or two separate ones:
+
+```ts
+import { releaseWorkspace, resumeWorkspaceRelease } from '@exadev/semantic-release-workspace';
+
+// Detach: tags and pushes, publishes nothing.
+const { detached } = await releaseWorkspace({ root: process.cwd(), gatePublish: true });
+
+// ...later, once whatever external gate needs to pass has passed, in this process or a fresh one:
+const outcome = await resumeWorkspaceRelease({ root: process.cwd(), detached: detached ?? [] });
+for (const pkg of outcome.packages) {
+  console.log(pkg.name, pkg.released ? `published ${pkg.gitTag}` : 'no release');
+}
+```
+
+`detached` (`WorkspaceReleaseOutcome.detached`, present only when `gatePublish: true`) carries everything `resumeWorkspaceRelease` needs -- one entry per package, each holding either the `@exadev/release-gate` state for a real release or `null` for a package with nothing to release. Its `relativeDirectory` field, not an absolute path, is what a resume pass resolves `cwd` from, so it works correctly even when the resume runs against a different checkout of the same repository than the one that ran the detach.
+
 ## Relationship to @qiwi/multi-semantic-release
 
 This tool exists because of [documents.js#664](https://github.com/ExaDev/documents.js/issues/664)'s research, which compared the third-party landscape — [@qiwi/multi-semantic-release](https://github.com/qiwi/multi-semantic-release) (itself a fork of [dhoulb's original](https://github.com/dhoulb/multi-semantic-release)), its successor [bulk-release](https://www.npmjs.com/package/bulk-release), and [Changesets](https://github.com/changesets/changesets) — against building in-house, and chose in-house: the org already maintains shared tooling config in exactly this shape, semantic-release's plugin lifecycle is well documented rather than proprietary, and the failure modes specific to cross-package version propagation were already understood from operating the ecosystem's existing automation ([background reading](https://dev.to/antongolub/the-chronicles-of-semantic-release-and-monorepos-5cfc)).
@@ -130,7 +202,16 @@ Run it from the workspace root (or pass `--root <directory>`). A dry run analyse
 | `--analyze-commits <json>` | Options for the wrapped @semantic-release/commit-analyzer (e.g. `'{"preset":"conventionalcommits","releaseRules":[...]}'`) |
 | `--generate-notes <json>` | Options for the wrapped @semantic-release/release-notes-generator |
 | `--commit-strategy <mode>` | `per-package` (default) or `single` — see [Commit strategies](#commit-strategies) |
+| `--gate-publish` | Tag and push each due package, but defer publishing — see [Gating publish](#gating-publish). Requires `--gate-state-file`; rejected with `--commit-strategy single` |
+| `--gate-state-file <path>` | With `--gate-publish`: where to write the state a later `resume` run needs |
 | `--config <file>` | A config file (`.json`, `.yaml`, `.yml`, `.js`, `.cjs`, or `.ts`, loaded via [cosmiconfig](https://github.com/cosmiconfig/cosmiconfig)) providing any of the above; explicit flags win |
+
+`resume` (a separate subcommand, not a `release` flag) finishes publishing what a `--gate-publish` run tagged and pushed:
+
+| Option | Meaning |
+| --- | --- |
+| `--root <directory>` | Workspace root holding `pnpm-workspace.yaml` in *this* checkout — may differ from the one that ran `release --gate-publish` (default: the process working directory) |
+| `--gate-state-file <path>` | Required — the state file a `release --gate-publish` run wrote |
 
 Listing `@semantic-release/commit-analyzer` or `@semantic-release/release-notes-generator` as a `--plugin` is rejected: the orchestrator always provides those two steps itself (wrapped), so configuring them there would be a silent no-op — pass their options via `--analyze-commits`/`--generate-notes` instead. A real (non-dry) run under `commitStrategy: 'per-package'` (the default) must include `@semantic-release/git` in the pipeline, because without it nothing commits released manifests and changelogs back to the branch; `commitStrategy: 'single'` is the opposite — it rejects `@semantic-release/git` outright, since it does that committing itself (see [Commit strategies](#commit-strategies)).
 
@@ -168,7 +249,7 @@ const outcome = await releaseWorkspace({
 });
 ```
 
-Every stage is also exported individually — `discoverWorkspace`, `buildDependencyGraph`, `topologicalOrder`, `updateDependencyRange`, `createScopedPlugins`, `filterCommitsToDirectory` — along with the error hierarchy (`WorkspaceReleaseError` and friends) so embedders can distinguish orchestration failures from unexpected crashes.
+Every stage is also exported individually — `discoverWorkspace`, `buildDependencyGraph`, `topologicalOrder`, `updateDependencyRange`, `createScopedPlugins`, `filterCommitsToDirectory`, `resumeWorkspaceRelease` — along with the error hierarchy (`WorkspaceReleaseError` and friends) so embedders can distinguish orchestration failures from unexpected crashes.
 
 ### Repository requirements
 
@@ -177,6 +258,7 @@ Every stage is also exported individually — `discoverWorkspace`, `buildDepende
 - A branch checkout, not a detached HEAD: dependency-bump commits are pushed to the current branch by name, so a detached HEAD stops the run with a `WorkspaceStateError` rather than pushing `HEAD:HEAD` at the remote. CI checkouts that default to a detached HEAD need the branch checked out explicitly.
 - A recognised CI environment for real runs (semantic-release refuses to publish from an unknown environment unless told otherwise); outside CI it falls back to dry-run behaviour.
 - Merge commits count for no package: `git log --name-only` lists no files for them, so their changes arrive through their parents, which the same range covers individually. Squash-merge workflows are unaffected, since a squash commit is an ordinary commit with a full file list.
+- A `resume` run needs the same checkout the `release --gate-publish` run pushed to, or an equivalent one at the same commit and tags (a fresh `git clone`/checkout of the same repository at the same ref works fine) -- it resolves each package's directory from `pnpm-workspace.yaml` relative to its own `--root`, not from any absolute path recorded during the detach pass.
 
 ## Status
 
