@@ -1,5 +1,8 @@
 # esbuild (vitest/vite's dependency pre-bundler) ships a native binary installed via a postinstall script -- pnpm ignores those by default, so allow it explicitly.
 allowBuilds:
   esbuild: true
-# Set low enough that a same-day devDependency release never blocks CI, matching this family's existing pnpm-workspace.yaml precedent (see e.g. document-schema.js). This package has no ExaDev sibling dependency of its own yet, so there is no minimumReleaseAgeExclude list -- add one here if a future dependency on another ExaDev-published package needs it.
+# Set low enough that a same-day devDependency release never blocks CI, matching this family's existing pnpm-workspace.yaml precedent (see e.g. document-schema.js).
 minimumReleaseAge: 60
+# @exadev/release-gate is this package's own real dependency (the gatePublish feature), published and maintained by ExaDev directly -- exempted from minimumReleaseAge entirely for the same reason as any other ExaDev-owned package: we control its release pipeline, so the supply-chain risk the gate exists for doesn't apply. pnpm 11 only honours this setting from pnpm-workspace.yaml, not the equivalent entry in pnpm's own global config -- confirmed directly while building release-gate itself.
+minimumReleaseAgeExclude:
+  - '@exadev/*'
