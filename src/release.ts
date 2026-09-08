@@ -2,7 +2,7 @@ import { resolve } from 'node:path';
 import semanticRelease from 'semantic-release';
 import type { BranchSpec, Options, Result } from 'semantic-release';
 import { formatDependencyBumpMessage } from './dependency-bump-commit';
-import { WorkspaceReleaseError } from './errors';
+import { ReleaseConfigurationError, WorkspaceReleaseError } from './errors';
 import { commitFiles, pushHead, resolveCommitIdentity, sanitizeGitEnv, type CommitIdentity } from './git';
 import { buildDependencyGraph, mustGet, topologicalOrder, validateDependencyRangeShapes, type DependencyGraph } from './graph';
 import { packageName } from './package-name';
@@ -19,6 +19,7 @@ import { regenerateLockfile } from './pnpm';
 import { updateDependencyRange } from './version-range';
 import { discoverWorkspace, type Workspace, type WorkspacePackage } from './workspace';
 import { releaseWorkspaceSingleCommit } from './single-commit-release';
+import { detachWorkspaceRelease, type DetachedPackageRelease } from './gate-publish';
 
 /**
  * How a run commits its released changes:
@@ -47,6 +48,10 @@ export interface ReleaseWorkspaceOptions {
   readonly log?: (message: string) => void;
   /** How the run commits its released changes. Defaults to `'per-package'`, today's exact existing behaviour. See `CommitStrategy` for what each mode does. */
   readonly commitStrategy?: CommitStrategy;
+  /**
+   * Opt-in, orthogonal to `commitStrategy` -- it governs *when* publish/success run relative to tag+push, not *how many commits* the release makes. When `true`, each package's release is tagged and pushed via `@exadev/release-gate`'s `detachRelease` but never published: `WorkspaceReleaseOutcome.detached` carries the state `resumeWorkspaceRelease` needs to finish publishing later, from the same process or a different one, once an external gate confirms the release should actually go out. Rejected outright in combination with `commitStrategy: 'single'` -- `single-commit-release.ts`'s tag/publish machinery is entirely bespoke and never goes through semantic-release's own `run()`, so it has no insertion point for `release-gate`'s primitives. Defaults to `false`, today's exact existing behaviour.
+   */
+  readonly gatePublish?: boolean;
 }
 
 /** One dependency-range change applied to a dependent package's manifest during the run, attached to the dependent's own outcome. */
@@ -72,6 +77,8 @@ export interface WorkspaceReleaseOutcome {
   /** The topological order the packages were released in. */
   readonly order: readonly string[];
   readonly packages: readonly PackageReleaseOutcome[];
+  /** Present only when `gatePublish: true`: one entry per package in `order`, carrying the `@exadev/release-gate` state `resumeWorkspaceRelease` needs to finish publishing it later, or `null` for a package that had nothing to release. */
+  readonly detached?: readonly DetachedPackageRelease[];
 }
 
 /**
@@ -80,6 +87,15 @@ export interface WorkspaceReleaseOutcome {
  * For each package, in topological order: run semantic-release's programmatic API with `cwd` scoped to the package directory, a `name@version` tag format to keep each package's tags distinct in the one shared tag namespace, and inline `analyzeCommits`/`generateNotes` plugins that filter the release range's commits down to the package's own directory before delegating to the standard plugins. When a package releases, every workspace package that depends on it and has not run yet gets its dependency range rewritten in its manifest and committed immediately -- before its own turn, so its commit analysis and its published manifest both see the new range.
  */
 export async function releaseWorkspace(options: ReleaseWorkspaceOptions = {}): Promise<WorkspaceReleaseOutcome> {
+  if (options.gatePublish === true) {
+    if ((options.commitStrategy ?? 'per-package') === 'single') {
+      throw new ReleaseConfigurationError(
+        'gatePublish is not supported together with commitStrategy: "single" -- single-commit-release.ts\'s tag/publish machinery is entirely bespoke and never goes through semantic-release\'s own run(), so it has no insertion point for release-gate\'s detach/resume primitives.',
+      );
+    }
+    return detachWorkspaceRelease(options);
+  }
+
   if ((options.commitStrategy ?? 'per-package') === 'single') {
     return releaseWorkspaceSingleCommit(options);
   }
@@ -100,16 +116,7 @@ export async function releaseWorkspace(options: ReleaseWorkspaceOptions = {}): P
   const analyzeCommitsConfig = options.analyzeCommits ?? {};
   const generateNotesConfig = options.generateNotes ?? {};
 
-  // Bumps recorded for a dependent during the run; its scoped plugins read them to force a patch release and to add the dependency section to its notes, and the entry is consumed when its turn arrives.
-  const pendingBumps = new Map<string, AppliedDependencyBump[]>();
-  let identity: CommitIdentity | undefined;
-
-  const outcomes: PackageReleaseOutcome[] = [];
-  for (const name of order) {
-    const pkg = mustGet(graph.packages, name, 'package');
-    const bumpsForThisPackage = pendingBumps.get(name) ?? [];
-
-    log(`Releasing ${name} from ${pkg.relativeDirectory}${bumpsForThisPackage.length > 0 ? ` (dependency ranges already bumped: ${bumpsForThisPackage.map((bump) => bump.dependency).join(', ')})` : ''}`);
+  const entries = await runReleaseLoop(graph, order, workspace, dryRun, log, async (pkg, bumpsForThisPackage) => {
     const result = await runPackageRelease(pkg, {
       publishPlugins,
       analyzeCommitsConfig,
@@ -119,27 +126,72 @@ export async function releaseWorkspace(options: ReleaseWorkspaceOptions = {}): P
       env,
       branches: options.branches,
     });
-
     const nextRelease = result === false ? undefined : result.nextRelease;
-    outcomes.push({
-      name,
-      directory: pkg.directory,
+    return { released: nextRelease !== undefined, version: nextRelease?.version, result };
+  });
+
+  const packages: PackageReleaseOutcome[] = entries.map((entry) => {
+    const nextRelease = entry.result === false ? undefined : entry.result.nextRelease;
+    return {
+      name: entry.name,
+      directory: entry.directory,
       released: nextRelease !== undefined,
       version: nextRelease?.version,
       gitTag: nextRelease?.gitTag,
       type: nextRelease?.type,
-      dependencyBumps: bumpsForThisPackage,
-    });
+      dependencyBumps: entry.dependencyBumps,
+    };
+  });
+
+  return { order, packages };
+}
+
+/** One package's outcome from a `runReleaseLoop` pass -- generic over `TResult`, the caller's own release-call return shape, since a normal release (`Result | false`) and a gated detach (`ReleaseGateState | null`) have nothing in common beyond "released or not, and which version." */
+export interface ReleaseLoopEntry<TResult> {
+  readonly name: string;
+  readonly directory: string;
+  readonly relativeDirectory: string;
+  readonly result: TResult;
+  readonly dependencyBumps: readonly AppliedDependencyBump[];
+}
+
+/**
+ * The per-package release loop shared by `releaseWorkspace` (normal per-package releases) and `detachWorkspaceRelease` (gated tag-only releases): iterate the topological `order`, call the caller's own `releaseOne` for each package, record which dependency-range bumps were already applied to it, and -- when it released -- bump every workspace dependent's manifest before that dependent's own turn (see `bumpDependents`'s doc comment for why this happens immediately rather than being staged). The two call sites differ only in how they call semantic-release (`semanticRelease(...)` vs `detachRelease(...)`) and how they read "did it release, and what version" off the result, both captured by `releaseOne`.
+ */
+export async function runReleaseLoop<TResult>(
+  graph: DependencyGraph,
+  order: readonly string[],
+  workspace: Workspace,
+  dryRun: boolean,
+  log: (message: string) => void,
+  releaseOne: (
+    pkg: WorkspacePackage,
+    bumpsForThisPackage: readonly AppliedDependencyBump[],
+  ) => Promise<{ readonly released: boolean; readonly version: string | undefined; readonly result: TResult }>,
+): Promise<readonly ReleaseLoopEntry<TResult>[]> {
+  // Bumps recorded for a dependent during the run; its scoped plugins read them to force a patch release and to add the dependency section to its notes, and the entry is consumed when its turn arrives.
+  const pendingBumps = new Map<string, AppliedDependencyBump[]>();
+  let identity: CommitIdentity | undefined;
+
+  const entries: ReleaseLoopEntry<TResult>[] = [];
+  for (const name of order) {
+    const pkg = mustGet(graph.packages, name, 'package');
+    const bumpsForThisPackage = pendingBumps.get(name) ?? [];
+
+    log(`Releasing ${name} from ${pkg.relativeDirectory}${bumpsForThisPackage.length > 0 ? ` (dependency ranges already bumped: ${bumpsForThisPackage.map((bump) => bump.dependency).join(', ')})` : ''}`);
+    const { released, version, result } = await releaseOne(pkg, bumpsForThisPackage);
+
+    entries.push({ name, directory: pkg.directory, relativeDirectory: pkg.relativeDirectory, result, dependencyBumps: bumpsForThisPackage });
     pendingBumps.delete(name);
 
-    if (nextRelease === undefined) {
+    if (!released || version === undefined) {
       log(`${name}: no release`);
       continue;
     }
-    log(`${name}: released ${nextRelease.gitTag}`);
+    log(`${name}: released ${version}`);
 
     identity ??= await resolveCommitIdentity({ cwd: workspace.root });
-    const bumps = await bumpDependents(pkg, nextRelease.version, graph, { workspace, dryRun, identity, log });
+    const bumps = await bumpDependents(pkg, version, graph, { workspace, dryRun, identity, log });
     for (const bump of bumps) {
       const forDependent = pendingBumps.get(bump.dependent) ?? [];
       forDependent.push(bump);
@@ -147,7 +199,7 @@ export async function releaseWorkspace(options: ReleaseWorkspaceOptions = {}): P
     }
   }
 
-  return { order, packages: outcomes };
+  return entries;
 }
 
 async function runPackageRelease(pkg: WorkspacePackage, options: {

@@ -1,15 +1,25 @@
 #!/usr/bin/env node
+import { readFile, writeFile } from 'node:fs/promises';
 import { cosmiconfigSync } from 'cosmiconfig';
 import { Command, InvalidArgumentError } from 'commander';
 // resolveJsonModule lets rolldown (via tsdown) inline this package's own declared version straight into the bundle at build time -- no runtime fs read.
 import { version } from '../package.json';
 import { WorkspaceReleaseError } from './errors';
+import { isDetachedPackageReleaseArray, resumeWorkspaceRelease } from './gate-publish';
 import { isJsonObject, isStringArray, isUnknownArray } from './json';
 import { packageName } from './package-name';
 import { type PublishPluginSpec } from './plugins';
 import { releaseWorkspace, type CommitStrategy, type PackageReleaseOutcome } from './release';
 
-const CONFIG_OPTION_KEYS: ReadonlySet<string> = new Set(['dryRun', 'branches', 'plugins', 'analyzeCommits', 'generateNotes', 'commitStrategy']);
+const CONFIG_OPTION_KEYS: ReadonlySet<string> = new Set([
+  'dryRun',
+  'branches',
+  'plugins',
+  'analyzeCommits',
+  'generateNotes',
+  'commitStrategy',
+  'gatePublish',
+]);
 const COMMIT_STRATEGIES: ReadonlySet<string> = new Set<CommitStrategy>(['per-package', 'single']);
 
 function isCommitStrategy(value: string): value is CommitStrategy {
@@ -43,10 +53,24 @@ export function createProgram(): Command {
     parseCommitStrategy,
   );
   release.option(
+    '--gate-publish',
+    'tag and push each due package via @exadev/release-gate, but defer publishing -- requires --gate-state-file, and cannot be combined with --commit-strategy single',
+  );
+  release.option(
+    '--gate-state-file <path>',
+    'with --gate-publish: where to write the state a later "resume" run needs to finish publishing',
+  );
+  release.option(
     '--config <file>',
-    'config file (.json, .yaml, .yml, .js, .cjs, or .ts) providing any of the release options (dryRun, branches, plugins, analyzeCommits, generateNotes, commitStrategy); explicit flags win',
+    'config file (.json, .yaml, .yml, .js, .cjs, or .ts) providing any of the release options (dryRun, branches, plugins, analyzeCommits, generateNotes, commitStrategy, gatePublish); explicit flags win',
   );
   release.action(runRelease);
+
+  const resume = program.command('resume');
+  resume.description('Finish publishing every package a --gate-publish release tagged and pushed but did not publish.');
+  resume.option('--root <directory>', 'workspace root holding pnpm-workspace.yaml (this checkout, which may differ from the one that ran release --gate-publish)', process.cwd());
+  resume.requiredOption('--gate-state-file <path>', 'the state file a "release --gate-publish" run wrote');
+  resume.action(runResume);
 
   return program;
 }
@@ -66,6 +90,8 @@ interface ReleaseFlags {
   readonly analyzeCommits: string | undefined;
   readonly generateNotes: string | undefined;
   readonly commitStrategy: CommitStrategy | undefined;
+  readonly gatePublish: boolean | undefined;
+  readonly gateStateFile: string | undefined;
   readonly config: string | undefined;
 }
 
@@ -76,10 +102,16 @@ const NO_CONFIG_FILE: ReleaseConfigFile = {
   analyzeCommits: undefined,
   generateNotes: undefined,
   commitStrategy: undefined,
+  gatePublish: undefined,
 };
 
 async function runRelease(flags: ReleaseFlags): Promise<void> {
   const file = flags.config === undefined ? NO_CONFIG_FILE : readReleaseConfigFile(flags.config);
+  const gatePublish = flags.gatePublish ?? file.gatePublish ?? false;
+  if (gatePublish && flags.gateStateFile === undefined) {
+    throw new InvalidArgumentError('--gate-publish requires --gate-state-file, since that is where the state a later "resume" run needs gets written');
+  }
+
   const outcome = await releaseWorkspace({
     root: flags.root,
     dryRun: flags.dryRun ?? (file.dryRun === true ? true : undefined),
@@ -89,8 +121,36 @@ async function runRelease(flags: ReleaseFlags): Promise<void> {
     analyzeCommits: flags.analyzeCommits === undefined ? file.analyzeCommits : parseJsonObjectFlag(flags.analyzeCommits, '--analyze-commits'),
     generateNotes: flags.generateNotes === undefined ? file.generateNotes : parseJsonObjectFlag(flags.generateNotes, '--generate-notes'),
     commitStrategy: flags.commitStrategy ?? file.commitStrategy,
+    gatePublish,
   });
 
+  for (const pkg of outcome.packages) {
+    console.log(describeOutcome(pkg));
+  }
+
+  if (gatePublish) {
+    // Asserted, not defaulted: the flags.gateStateFile === undefined case above already rejected this combination before releaseWorkspace ever ran, so reaching here with it still undefined would mean that check regressed, not a legitimate state to fall back from silently.
+    if (flags.gateStateFile === undefined) {
+      throw new WorkspaceReleaseError('gatePublish was true but no --gate-state-file was resolved -- this should be unreachable.');
+    }
+    await writeFile(flags.gateStateFile, JSON.stringify(outcome.detached ?? [], null, 2));
+    console.log(`${packageName}: wrote gate state for ${(outcome.detached ?? []).length} package(s) to ${flags.gateStateFile}`);
+  }
+}
+
+interface ResumeFlags {
+  readonly root: string;
+  readonly gateStateFile: string;
+}
+
+async function runResume(flags: ResumeFlags): Promise<void> {
+  const raw = await readFile(flags.gateStateFile, 'utf8');
+  const parsed: unknown = JSON.parse(raw);
+  if (!isDetachedPackageReleaseArray(parsed)) {
+    throw new InvalidArgumentError(`--gate-state-file ${flags.gateStateFile} does not contain a valid gate state array`);
+  }
+
+  const outcome = await resumeWorkspaceRelease({ root: flags.root, detached: parsed });
   for (const pkg of outcome.packages) {
     console.log(describeOutcome(pkg));
   }
@@ -147,6 +207,7 @@ export interface ReleaseConfigFile {
   readonly analyzeCommits: Record<string, unknown> | undefined;
   readonly generateNotes: Record<string, unknown> | undefined;
   readonly commitStrategy: CommitStrategy | undefined;
+  readonly gatePublish: boolean | undefined;
 }
 
 // A single loader instance would carry cosmiconfig's own load cache across every --config read, which never helps here (the CLI reads a given path at most once per process) and would be a stale-cache hazard for the one thing that does invoke this function repeatedly: this file's own test suite loading many different fixture paths in one process.
@@ -175,7 +236,7 @@ export function readReleaseConfigFile(path: string): ReleaseConfigFile {
     }
   }
 
-  const { dryRun, branches, plugins, analyzeCommits, generateNotes, commitStrategy } = parsed;
+  const { dryRun, branches, plugins, analyzeCommits, generateNotes, commitStrategy, gatePublish } = parsed;
   if (dryRun !== undefined && typeof dryRun !== 'boolean') {
     throw new InvalidArgumentError(`--config file ${path}: "dryRun" must be a boolean`);
   }
@@ -194,6 +255,9 @@ export function readReleaseConfigFile(path: string): ReleaseConfigFile {
   if (commitStrategy !== undefined && (typeof commitStrategy !== 'string' || !isCommitStrategy(commitStrategy))) {
     throw new InvalidArgumentError(`--config file ${path}: "commitStrategy" must be one of: ${[...COMMIT_STRATEGIES].join(', ')}`);
   }
+  if (gatePublish !== undefined && typeof gatePublish !== 'boolean') {
+    throw new InvalidArgumentError(`--config file ${path}: "gatePublish" must be a boolean`);
+  }
 
   return {
     dryRun,
@@ -202,6 +266,7 @@ export function readReleaseConfigFile(path: string): ReleaseConfigFile {
     analyzeCommits,
     generateNotes,
     commitStrategy,
+    gatePublish,
   };
 }
 
