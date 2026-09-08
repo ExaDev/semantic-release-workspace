@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@exadev/release-gate':
+        specifier: ^1.0.0
+        version: 1.0.0(typescript@6.0.3)
       commander:
         specifier: ^15.0.0
         version: 15.0.0
@@ -294,6 +297,10 @@ packages:
     peerDependencies:
       eslint: '>=10.0.0'
       typescript-eslint: '>=8.0.0'
+
+  '@exadev/release-gate@1.0.0':
+    resolution: {integrity: sha512-ud9Tk0xVq4xgBgjs1R5uvwAkDCmnaApslKzoklGm2Y+wlCJsAO50qGUi0QQ5lTpW0DWinCbne6QZXFVeJ+qYsA==}
+    engines: {node: '>=20'}
 
   '@humanfs/core@0.19.2':
     resolution: {integrity: sha512-UhXNm+CFMWcbChXywFwkmhqjs3PRCmcSa/hfBgLIb7oQ5HNb1wS0icWsGtSAUNgefHeI+eBrA8I1fxmbHsGdvA==}
@@ -2958,6 +2965,16 @@ snapshots:
     dependencies:
       eslint: 10.9.1(jiti@2.6.1)
       typescript-eslint: 8.69.0(eslint@10.9.1(jiti@2.6.1))(typescript@6.0.3)
+
+  '@exadev/release-gate@1.0.0(typescript@6.0.3)':
+    dependencies:
+      env-ci: 11.2.0
+      semantic-release: 25.0.9(typescript@6.0.3)
+      semver: 7.8.5
+    transitivePeerDependencies:
+      - kerberos
+      - supports-color
+      - typescript
 
   '@humanfs/core@0.19.2':
     dependencies:

@@ -31,6 +31,7 @@ export {
   type PackageReleaseOutcome,
   type AppliedDependencyBump,
 } from './release';
+export { resumeWorkspaceRelease, type DetachedPackageRelease, type ResumeWorkspaceReleaseOptions } from './gate-publish';
 
 export {
   WorkspaceReleaseError,
