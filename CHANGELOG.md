@@ -1,3 +1,10 @@
+# [1.3.0](https://github.com/ExaDev/semantic-release-workspace/compare/v1.2.4...v1.3.0) (2026-09-08)
+
+
+### Features
+
+* tag and push via @exadev/release-gate before publishing, deferred to a resume step ([e7748d6](https://github.com/ExaDev/semantic-release-workspace/commit/e7748d607c26dc10b48f3a5698a9fd5118620b67))
+
 ## [1.2.4](https://github.com/ExaDev/semantic-release-workspace/compare/v1.2.3...v1.2.4) (2026-09-08)
 
 ## [1.2.3](https://github.com/ExaDev/semantic-release-workspace/compare/v1.2.2...v1.2.3) (2026-09-06)
