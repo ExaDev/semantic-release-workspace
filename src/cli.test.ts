@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { InvalidArgumentError } from 'commander';
 import { afterEach, describe, expect, it } from 'vitest';
-import { readReleaseConfigFile } from './cli';
+import { createProgram, readReleaseConfigFile } from './cli';
 
 const temporaryDirectories: string[] = [];
 
@@ -102,5 +102,41 @@ describe('readReleaseConfigFile', () => {
     const path = join(directory, 'does-not-exist.json');
     expect(() => readReleaseConfigFile(path)).toThrow(InvalidArgumentError);
     expect(() => readReleaseConfigFile(path)).toThrow(/--config file .* could not be loaded/);
+  });
+
+  it('reads a gatePublish of true', async () => {
+    const path = await temporaryConfigFile('release.config.json', JSON.stringify({ gatePublish: true }));
+    expect(readReleaseConfigFile(path).gatePublish).toBe(true);
+  });
+
+  it('leaves gatePublish undefined when the config file omits it, so releaseWorkspace applies its own "false" default', async () => {
+    const path = await temporaryConfigFile('release.config.json', JSON.stringify({ dryRun: true }));
+    expect(readReleaseConfigFile(path).gatePublish).toBeUndefined();
+  });
+
+  it('rejects a gatePublish that is not a boolean', async () => {
+    const path = await temporaryConfigFile('release.config.json', JSON.stringify({ gatePublish: 'yes' }));
+    expect(() => readReleaseConfigFile(path)).toThrow(InvalidArgumentError);
+    expect(() => readReleaseConfigFile(path)).toThrow(/"gatePublish" must be a boolean/);
+  });
+});
+
+describe('createProgram', () => {
+  it('registers --gate-publish and --gate-state-file on the release command', () => {
+    const release = createProgram().commands.find((command) => command.name() === 'release');
+    expect(release).toBeDefined();
+    const optionFlags = (release?.options ?? []).map((option) => option.long);
+    expect(optionFlags).toContain('--gate-publish');
+    expect(optionFlags).toContain('--gate-state-file');
+  });
+
+  it('registers a resume subcommand requiring --gate-state-file', () => {
+    const resume = createProgram().commands.find((command) => command.name() === 'resume');
+    expect(resume).toBeDefined();
+    const gateStateFile = resume?.options.find((option) => option.long === '--gate-state-file');
+    expect(gateStateFile).toBeDefined();
+    expect(gateStateFile?.mandatory).toBe(true);
+    const optionFlags = (resume?.options ?? []).map((option) => option.long);
+    expect(optionFlags).toContain('--root');
   });
 });
