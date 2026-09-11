@@ -107,7 +107,7 @@
     "publint": "^0.3.23",
     "semantic-release": "^25.0.9",
     "signale": "^1.4.0",
-    "tsdown": "^0.22.14",
+    "tsdown": "^0.23.0",
     "turbo": "^2.10.11",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.67.0",
