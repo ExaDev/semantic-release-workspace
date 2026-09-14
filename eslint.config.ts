@@ -1,9 +1,9 @@
 import js from '@eslint/js';
 import exadevRecommendedTypeChecked from '@exadev/eslint-config';
+import { defineConfig } from 'eslint/config';
 import globals from 'globals';
-import tseslint from 'typescript-eslint';
 
-export default tseslint.config(
+export default defineConfig(
   {
     // test/smoke.test.mjs spawns the built dist/cli.js, deliberately outside tsconfig's "src" program (it tests build output, not the source).
     ignores: ['dist', 'coverage', 'node_modules', 'test'],
