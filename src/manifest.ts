@@ -33,7 +33,7 @@ export async function readManifest(path: string): Promise<PackageManifest> {
   // The name is spliced verbatim into a lodash template (semantic-release's `tagFormat`), so it must be restricted to npm's own package-name rules -- which exclude every lodash template delimiter -- before it ever reaches that template, not merely "non-empty".
   const validity = validateNpmPackageName(name);
   if (!validity.validForOldPackages) {
-    throw new WorkspaceDiscoveryError(`${path} has an invalid "name" ("${name}"): ${(validity.errors ?? []).join('; ')}`);
+    throw new WorkspaceDiscoveryError(`${path} has an invalid "name" ("${name}"): ${validity.errors.join('; ')}`);
   }
   if (typeof version !== 'string' || version.length === 0) {
     throw new WorkspaceDiscoveryError(`${path} has no "version".`);
