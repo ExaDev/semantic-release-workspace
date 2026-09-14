@@ -9,9 +9,10 @@ import { isJsonObject } from './json';
 import { writeDependencyRange } from './manifest';
 import { type PublishPluginSpec } from './plugins';
 import { releaseWorkspace } from './release';
+import { TestTimeoutMs } from './test-timeouts';
 
 /**
- * The publish pipeline for these tests is deliberately offline: @semantic-release/npm with npmPublish false still performs the real manifest version bump in prepare, and @semantic-release/git still performs the real release commit, so every part of the orchestrator's sequencing is exercised against real git state (tags, commits, pushes to the fixture's bare remote) without touching the npm registry or GitHub.
+ * The publish pipeline for these tests is deliberately offline: `@semantic-release/npm` with npmPublish false still performs the real manifest version bump in prepare, and `@semantic-release/git` still performs the real release commit, so every part of the orchestrator's sequencing is exercised against real git state (tags, commits, pushes to the fixture's bare remote) without touching the npm registry or GitHub.
  */
 const FIXTURE_PLUGINS: readonly PublishPluginSpec[] = [
   ['@semantic-release/npm', { npmPublish: false }],
@@ -96,7 +97,7 @@ describe('releaseWorkspace against a real git workspace', () => {
     } finally {
       await fixture.remove();
     }
-  }, 240_000);
+  }, TestTimeoutMs.Long);
 
   it('behaves identically whether commitStrategy is omitted or explicitly set to "per-package"', async () => {
     const fixture = await createWorkspaceFixture(chainPackages, [
@@ -115,11 +116,11 @@ describe('releaseWorkspace against a real git workspace', () => {
       const bumpLog = await git(['log', '--format=%s', '--grep=^chore(deps):', 'main'], { cwd: fixture.root });
       expect(bumpLog.split('\n').filter(Boolean)).toHaveLength(2);
       const releaseLog = await git(['log', '--format=%s', '--grep=^chore(release):', 'main'], { cwd: fixture.root });
-      expect(releaseLog.split('\n').filter(Boolean)).toHaveLength(3);
+      expect(releaseLog.split('\n').filter(Boolean)).toHaveLength(chainPackages.length);
     } finally {
       await fixture.remove();
     }
-  }, 240_000);
+  }, TestTimeoutMs.Long);
 
   it('finds nothing to release on a second run over already-released state', async () => {
     const fixture = await createWorkspaceFixture(chainPackages, [
@@ -136,7 +137,7 @@ describe('releaseWorkspace against a real git workspace', () => {
     } finally {
       await fixture.remove();
     }
-  }, 240_000);
+  }, TestTimeoutMs.Long);
 
   it('reports the same cascade in a dry run, including the forced dependency patches, without writing anything', async () => {
     const fixture = await createWorkspaceFixture(chainPackages, [
@@ -158,29 +159,27 @@ describe('releaseWorkspace against a real git workspace', () => {
     } finally {
       await fixture.remove();
     }
-  }, 240_000);
+  }, TestTimeoutMs.Long);
 
   it('fails loudly on a cyclic dependency graph, naming the loop, instead of picking an arbitrary order', async () => {
-    const fixture = await createWorkspaceFixture(
-      [
-        { name: '@fixture/x', version: '1.0.0', dependencies: { '@fixture/y': '^1.0.0' } },
-        { name: '@fixture/y', version: '1.0.0', dependencies: { '@fixture/x': '^1.0.0' } },
-      ],
-      [],
-    );
+    const cyclePackages: readonly FixturePackage[] = [
+      { name: '@fixture/x', version: '1.0.0', dependencies: { '@fixture/y': '^1.0.0' } },
+      { name: '@fixture/y', version: '1.0.0', dependencies: { '@fixture/x': '^1.0.0' } },
+    ];
+    const fixture = await createWorkspaceFixture(cyclePackages, []);
     try {
       const failure = releaseWorkspace({ root: fixture.root, env: releaseEnv(), plugins: FIXTURE_PLUGINS });
       await expect(failure).rejects.toBeInstanceOf(DependencyCycleError);
       await expect(failure).rejects.toThrow(
         /cycle: @fixture\/x -> @fixture\/y -> @fixture\/x|cycle: @fixture\/y -> @fixture\/x -> @fixture\/y/,
       );
-      // Nothing was committed while failing: the log still holds only the fixture's own scaffolding.
+      // Nothing was committed while failing: the log still holds only the fixture's own scaffolding -- one "scaffold workspace" commit plus one per package (see createWorkspaceFixture).
       const log = await git(['log', '--oneline', 'main'], { cwd: fixture.root });
-      expect(log.split('\n').filter(Boolean)).toHaveLength(3);
+      expect(log.split('\n').filter(Boolean)).toHaveLength(cyclePackages.length + 1);
     } finally {
       await fixture.remove();
     }
-  }, 60_000);
+  }, TestTimeoutMs.Medium);
 
   it('cascades through workspace: ranges pnpm resolves at publish time, releasing dependents without editing or committing their manifests', async () => {
     const fixture = await createWorkspaceFixture(
@@ -225,7 +224,7 @@ describe('releaseWorkspace against a real git workspace', () => {
     } finally {
       await fixture.remove();
     }
-  }, 240_000);
+  }, TestTimeoutMs.Long);
 
   it('releases only the package with changes; the packages upstream of it release nothing', async () => {
     const fixture = await createWorkspaceFixture(chainPackages, [
@@ -241,7 +240,7 @@ describe('releaseWorkspace against a real git workspace', () => {
     } finally {
       await fixture.remove();
     }
-  }, 240_000);
+  }, TestTimeoutMs.Long);
 
   it('releases every package correctly when the workspace is nested below the git repository toplevel', async () => {
     const fixture = await createWorkspaceFixture(
@@ -262,7 +261,7 @@ describe('releaseWorkspace against a real git workspace', () => {
     } finally {
       await fixture.remove();
     }
-  }, 240_000);
+  }, TestTimeoutMs.Long);
 
   it('releases a package whose directory name contains a non-ASCII character', async () => {
     const fixture = await createWorkspaceFixture(
@@ -286,7 +285,7 @@ describe('releaseWorkspace against a real git workspace', () => {
     } finally {
       await fixture.remove();
     }
-  }, 240_000);
+  }, TestTimeoutMs.Long);
 
   it('recovers the forced-patch decision from a bump commit already in history, as if a previous run stopped between the dependency release and the dependent turn', async () => {
     const fixture = await createWorkspaceFixture(
@@ -321,7 +320,7 @@ describe('releaseWorkspace against a real git workspace', () => {
     } finally {
       await fixture.remove();
     }
-  }, 240_000);
+  }, TestTimeoutMs.Long);
 
   it('regenerates pnpm-lock.yaml alongside a dependency-range bump, so the two never land out of sync', async () => {
     const fixture = await createWorkspaceFixture(
@@ -346,7 +345,7 @@ describe('releaseWorkspace against a real git workspace', () => {
     } finally {
       await fixture.remove();
     }
-  }, 240_000);
+  }, TestTimeoutMs.Long);
 
   it('rejects an unsupported dependency range before anything releases, not only once the dependency it names has already been published', async () => {
     const fixture = await createWorkspaceFixture(
@@ -367,7 +366,7 @@ describe('releaseWorkspace against a real git workspace', () => {
     } finally {
       await fixture.remove();
     }
-  }, 60_000);
+  }, TestTimeoutMs.Medium);
 });
 
 async function readManifest(root: string, packageName: string): Promise<Record<string, unknown>> {
