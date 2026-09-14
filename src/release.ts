@@ -38,11 +38,11 @@ export interface ReleaseWorkspaceOptions {
   readonly dryRun?: boolean;
   /** Release branch configuration for semantic-release. Defaults to semantic-release's own default branch list. */
   readonly branches?: readonly BranchSpec[];
-  /** Publish-pipeline plugins (changelog, npm, GitHub, git), each scoped per package by semantic-release's own `cwd`. Defaults to the standard pipeline in DEFAULT_PUBLISH_PLUGINS for `commitStrategy: 'per-package'`, or SINGLE_COMMIT_DEFAULT_PUBLISH_PLUGINS (the same list minus @semantic-release/git) for `commitStrategy: 'single'`. */
+  /** Publish-pipeline plugins (changelog, npm, GitHub, git), each scoped per package by semantic-release's own `cwd`. Defaults to the standard pipeline in DEFAULT_PUBLISH_PLUGINS for `commitStrategy: 'per-package'`, or SINGLE_COMMIT_DEFAULT_PUBLISH_PLUGINS (the same list minus `@semantic-release/git`) for `commitStrategy: 'single'`. */
   readonly plugins?: readonly PublishPluginSpec[];
-  /** Options for the wrapped @semantic-release/commit-analyzer, applied per package after path filtering. */
+  /** Options for the wrapped `@semantic-release/commit-analyzer`, applied per package after path filtering. */
   readonly analyzeCommits?: Record<string, unknown>;
-  /** Options for the wrapped @semantic-release/release-notes-generator, applied per package after path filtering. */
+  /** Options for the wrapped `@semantic-release/release-notes-generator`, applied per package after path filtering. */
   readonly generateNotes?: Record<string, unknown>;
   /** Progress sink for the orchestrator's own narration (semantic-release logs its own detail). Defaults to `console.log`. */
   readonly log?: (message: string) => void;
@@ -61,17 +61,16 @@ export interface AppliedDependencyBump extends DependencyBump {
   readonly field: DependencyField;
 }
 
-export interface PackageReleaseOutcome {
+// `released` is the discriminant: `version`/`gitTag`/`type` are only ever populated together, whenever a package actually released, and never independently -- every producer of this type sets all three or none. Modelling that as two required-together fields tied to a boolean, rather than three independently-optional ones, lets a consumer that has already checked `released` use `gitTag`/`type` without a further null check.
+export type PackageReleaseOutcome = {
   readonly name: string;
   readonly directory: string;
-  readonly released: boolean;
-  readonly version: string | undefined;
-  readonly gitTag: string | undefined;
-  /** The semantic-release release type ('minor', 'patch', ...), including the forced 'patch' of a dependency-bump-only release. */
-  readonly type: string | undefined;
   /** Dependency ranges rewritten in this package's own manifest because a workspace dependency released earlier in the run. */
   readonly dependencyBumps: readonly AppliedDependencyBump[];
-}
+} & (
+  | { readonly released: true; readonly version: string; readonly gitTag: string; readonly type: string }
+  | { readonly released: false; readonly version?: undefined; readonly gitTag?: undefined; readonly type?: undefined }
+);
 
 export interface WorkspaceReleaseOutcome {
   /** The topological order the packages were released in. */
@@ -110,7 +109,7 @@ export async function releaseWorkspace(options: ReleaseWorkspaceOptions = {}): P
   const graph = buildDependencyGraph(workspace.packages);
   validateDependencyRangeShapes(graph);
   const order = topologicalOrder(graph);
-  log(`${packageName}: ${order.length} packages in release order: ${order.join(' -> ')}`);
+  log(`${packageName}: ${String(order.length)} packages in release order: ${order.join(' -> ')}`);
 
   const publishPlugins = resolvePublishPlugins(options.plugins ?? DEFAULT_PUBLISH_PLUGINS, workspace.root, { requireGitPlugin: !dryRun });
   const analyzeCommitsConfig = options.analyzeCommits ?? {};
@@ -132,15 +131,17 @@ export async function releaseWorkspace(options: ReleaseWorkspaceOptions = {}): P
 
   const packages: PackageReleaseOutcome[] = entries.map((entry) => {
     const nextRelease = entry.result === false ? undefined : entry.result.nextRelease;
-    return {
-      name: entry.name,
-      directory: entry.directory,
-      released: nextRelease !== undefined,
-      version: nextRelease?.version,
-      gitTag: nextRelease?.gitTag,
-      type: nextRelease?.type,
-      dependencyBumps: entry.dependencyBumps,
-    };
+    return nextRelease === undefined
+      ? { name: entry.name, directory: entry.directory, released: false, dependencyBumps: entry.dependencyBumps }
+      : {
+          name: entry.name,
+          directory: entry.directory,
+          released: true,
+          version: nextRelease.version,
+          gitTag: nextRelease.gitTag,
+          type: nextRelease.type,
+          dependencyBumps: entry.dependencyBumps,
+        };
   });
 
   return { order, packages };

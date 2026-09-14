@@ -20,7 +20,7 @@ import { discoverWorkspace, type WorkspacePackage } from './workspace';
  *
  * 1. **Analyse** (this file's `analysePackage`): for every package, in topological order, run semantic-release with `dryRun: true` forced (regardless of the caller's own `dryRun` option) using the same path-scoped `analyzeCommits`/`generateNotes` wrapper `commitStrategy: 'per-package'` uses -- computing each package's next version and notes without writing, committing, tagging, or publishing anything. Cross-package dependency bumps are tracked purely in memory during this phase (`pendingBumps`), exactly as the per-package strategy tracks them for the span of one run; nothing is committed yet for a later run to recover from, because this strategy never leaves a partial commit for a crash to recover from in the first place -- either the whole combined commit lands, or nothing does.
  * 2. **Verify** every released package's configured publish plugins' `verifyConditions` step (npm registry auth, GitHub token/repo access), before any file is written -- the same fail-fast-before-anything-releases discipline `validateDependencyRangeShapes` already applies to dependency ranges.
- * 3. **Prepare**: for every released package, in topological order, apply any dependency-range bump its own manifest received (writing `package.json` directly, the same `writeDependencyRange` the per-package strategy uses), then run every configured publish plugin's own `prepare` step generically (whichever it defines -- @semantic-release/npm bumps `package.json`'s version, @semantic-release/changelog writes `CHANGELOG.md`). @semantic-release/git is rejected outright from this mode's plugin list (see `resolvePublishPlugins`'s `forbidGitPlugin`), since its own `prepare` step would create exactly the per-package commit this mode exists to avoid. The lockfile is regenerated once at the end, not once per bump, since `pnpm install --lockfile-only` recomputes it from whatever is on disk regardless of how many manifests changed.
+ * 3. **Prepare**: for every released package, in topological order, apply any dependency-range bump its own manifest received (writing `package.json` directly, the same `writeDependencyRange` the per-package strategy uses), then run every configured publish plugin's own `prepare` step generically (whichever it defines -- `@semantic-release/npm` bumps `package.json`'s version, `@semantic-release/changelog` writes `CHANGELOG.md`). `@semantic-release/git` is rejected outright from this mode's plugin list (see `resolvePublishPlugins`'s `forbidGitPlugin`), since its own `prepare` step would create exactly the per-package commit this mode exists to avoid. The lockfile is regenerated once at the end, not once per bump, since `pnpm install --lockfile-only` recomputes it from whatever is on disk regardless of how many manifests changed.
  * 4. **Commit**: discover every file phase 3 touched via `git status` (rather than predicting filenames per plugin), make one commit, tag it once per released package (`name@version`, lightweight, matching semantic-release's own tag form), and push the commit and every tag together.
  * 5. **Publish**: for every released package, in topological order, call each configured plugin's own `publish` step directly (not through semantic-release's top-level orchestrator -- see the note below), then `success`.
  *
@@ -40,7 +40,7 @@ export async function releaseWorkspaceSingleCommit(options: ReleaseWorkspaceOpti
   const graph = buildDependencyGraph(workspace.packages);
   validateDependencyRangeShapes(graph);
   const order = topologicalOrder(graph);
-  log(`${packageName}: ${order.length} packages in release order: ${order.join(' -> ')} (commitStrategy: single)`);
+  log(`${packageName}: ${String(order.length)} packages in release order: ${order.join(' -> ')} (commitStrategy: single)`);
 
   const resolvedPlugins = resolvePublishPlugins(options.plugins ?? SINGLE_COMMIT_DEFAULT_PUBLISH_PLUGINS, workspace.root, {
     requireGitPlugin: false,
@@ -68,22 +68,28 @@ export async function releaseWorkspaceSingleCommit(options: ReleaseWorkspaceOpti
       bumpsForThisPackage,
       env,
       branches: options.branches,
-      onCommitsResolved: (commits) => capturedCommits.set(name, commits),
+      onCommitsResolved: (commits) => {
+        capturedCommits.set(name, commits);
+      },
       onContextCaptured: (context) => {
         captured.branch = context.branch;
         captured.repositoryUrl = context.repositoryUrl;
       },
     });
 
-    outcomes.push({
-      name,
-      directory: pkg.directory,
-      released: nextRelease !== undefined,
-      version: nextRelease?.version,
-      gitTag: nextRelease?.gitTag,
-      type: nextRelease?.type,
-      dependencyBumps: bumpsForThisPackage,
-    });
+    outcomes.push(
+      nextRelease === undefined
+        ? { name, directory: pkg.directory, released: false, dependencyBumps: bumpsForThisPackage }
+        : {
+            name,
+            directory: pkg.directory,
+            released: true,
+            version: nextRelease.version,
+            gitTag: nextRelease.gitTag,
+            type: nextRelease.type,
+            dependencyBumps: bumpsForThisPackage,
+          },
+    );
 
     if (nextRelease === undefined) {
       log(`${name}: no release`);
@@ -107,7 +113,7 @@ export async function releaseWorkspaceSingleCommit(options: ReleaseWorkspaceOpti
   const repositoryUrl = captured.repositoryUrl;
   if (branch === undefined || repositoryUrl === undefined) {
     throw new ReleaseConfigurationError(
-      `Internal error: ${packageName} analysed ${planned.length} package release(s) but never captured a branch/repositoryUrl from semantic-release's own context. This should be impossible when at least one package releases.`,
+      `Internal error: ${packageName} analysed ${String(planned.length)} package release(s) but never captured a branch/repositoryUrl from semantic-release's own context. This should be impossible when at least one package releases.`,
     );
   }
 
@@ -149,7 +155,7 @@ export async function releaseWorkspaceSingleCommit(options: ReleaseWorkspaceOpti
   const touchedPaths = await workingTreeChanges({ cwd: repoRoot });
   if (touchedPaths.length === 0) {
     throw new ReleaseConfigurationError(
-      `${packageName}: analysis planned ${planned.length} release(s), but no files changed while preparing them. Every configured publish plugin's own "prepare" step (bumping package.json, writing CHANGELOG.md) produced nothing to commit -- check the plugin list includes something that writes the version, e.g. @semantic-release/npm.`,
+      `${packageName}: analysis planned ${String(planned.length)} release(s), but no files changed while preparing them. Every configured publish plugin's own "prepare" step (bumping package.json, writing CHANGELOG.md) produced nothing to commit -- check the plugin list includes something that writes the version, e.g. @semantic-release/npm.`,
     );
   }
   const identity = await resolveCommitIdentity({ cwd: repoRoot });
@@ -160,7 +166,7 @@ export async function releaseWorkspaceSingleCommit(options: ReleaseWorkspaceOpti
     await createTag(tagName, commitSha, { cwd: repoRoot });
   }
   await pushHeadAndTags(tagNames, { cwd: repoRoot });
-  log(`${packageName}: committed ${commitSha} and pushed ${tagNames.length} tag(s): ${tagNames.join(', ')}`);
+  log(`${packageName}: committed ${commitSha} and pushed ${String(tagNames.length)} tag(s): ${tagNames.join(', ')}`);
 
   // Phase 5: publish, then success, per released package.
   for (const release of planned) {
@@ -283,7 +289,7 @@ function describeCombinedCommit(planned: readonly PlannedPackageRelease[]): stri
   return ['chore(release): batch release [skip ci]', '', ...lines].join('\n');
 }
 
-/** The subset of a semantic-release plugin context this mode's own hand-built calls actually construct and pass, covering exactly the fields the `verifyConditions`/`prepare`/`publish`/`success` steps of @semantic-release/changelog, @semantic-release/npm, and @semantic-release/github read (confirmed by reading each plugin's own source) -- not the full upstream `VerifyReleaseContext` shape, most of which (`envCi`, `branches` plural, `lastRelease`) none of those steps consult. */
+/** The subset of a semantic-release plugin context this mode's own hand-built calls actually construct and pass, covering exactly the fields the `verifyConditions`/`prepare`/`publish`/`success` steps of `@semantic-release/changelog`, `@semantic-release/npm`, and `@semantic-release/github` read (confirmed by reading each plugin's own source) -- not the full upstream `VerifyReleaseContext` shape, most of which (`envCi`, `branches` plural, `lastRelease`) none of those steps consult. */
 interface PluginCallContext {
   readonly cwd: string;
   readonly env: NodeJS.ProcessEnv;
@@ -325,10 +331,10 @@ function buildPluginContext(
   releases: readonly unknown[],
 ): PluginCallContext {
   const logger: PluginLogger = {
-    log: (...args) => shared.log(`[${release.pkg.name}] ${args.map(String).join(' ')}`),
-    warn: (...args) => shared.log(`[${release.pkg.name}] warn: ${args.map(String).join(' ')}`),
-    error: (...args) => shared.log(`[${release.pkg.name}] error: ${args.map(String).join(' ')}`),
-    success: (...args) => shared.log(`[${release.pkg.name}] ${args.map(String).join(' ')}`),
+    log: (...args) => { shared.log(`[${release.pkg.name}] ${args.map(String).join(' ')}`); },
+    warn: (...args) => { shared.log(`[${release.pkg.name}] warn: ${args.map(String).join(' ')}`); },
+    error: (...args) => { shared.log(`[${release.pkg.name}] error: ${args.map(String).join(' ')}`); },
+    success: (...args) => { shared.log(`[${release.pkg.name}] ${args.map(String).join(' ')}`); },
   };
   return {
     cwd: release.pkg.directory,
