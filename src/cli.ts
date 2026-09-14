@@ -134,7 +134,7 @@ async function runRelease(flags: ReleaseFlags): Promise<void> {
       throw new WorkspaceReleaseError('gatePublish was true but no --gate-state-file was resolved -- this should be unreachable.');
     }
     await writeFile(flags.gateStateFile, JSON.stringify(outcome.detached ?? [], null, 2));
-    console.log(`${packageName}: wrote gate state for ${(outcome.detached ?? []).length} package(s) to ${flags.gateStateFile}`);
+    console.log(`${packageName}: wrote gate state for ${String((outcome.detached ?? []).length)} package(s) to ${flags.gateStateFile}`);
   }
 }
 
@@ -164,7 +164,7 @@ function describeOutcome(pkg: PackageReleaseOutcome): string {
   return `${pkg.name}: ${pkg.gitTag} (${pkg.type}${bumps === '' ? '' : `; dependency bumps: ${bumps}`})`;
 }
 
-function collectRepeated(value: string, previous: string[]): string[] {
+function collectRepeated(value: string, previous: readonly string[]): string[] {
   return [...previous, value];
 }
 
