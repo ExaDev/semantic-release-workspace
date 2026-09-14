@@ -8,7 +8,7 @@ import { readManifest } from './manifest';
 const temporaryDirectories: string[] = [];
 
 afterEach(async () => {
-  await Promise.all(temporaryDirectories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
+  await Promise.all(temporaryDirectories.splice(0).map(async (directory) => rm(directory, { recursive: true, force: true })));
 });
 
 async function temporaryManifest(manifest: Record<string, unknown>): Promise<string> {

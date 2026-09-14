@@ -9,7 +9,7 @@ import { discoverWorkspace } from './workspace';
 const temporaryDirectories: string[] = [];
 
 afterEach(async () => {
-  await Promise.all(temporaryDirectories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
+  await Promise.all(temporaryDirectories.splice(0).map(async (directory) => rm(directory, { recursive: true, force: true })));
 });
 
 /** Discovery requires a real git repository (it resolves the workspace root's own prefix within the repository via `git rev-parse --show-prefix` to path-scope commit filtering correctly), so every fixture directory is git-initialised even when a test never makes a commit. */
