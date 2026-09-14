@@ -40,7 +40,7 @@ export async function detachWorkspaceRelease(options: ReleaseWorkspaceOptions): 
   const graph = buildDependencyGraph(workspace.packages);
   validateDependencyRangeShapes(graph);
   const order = topologicalOrder(graph);
-  log(`${packageName}: ${order.length} packages in release order (gated -- tag only, publish deferred): ${order.join(' -> ')}`);
+  log(`${packageName}: ${String(order.length)} packages in release order (gated -- tag only, publish deferred): ${order.join(' -> ')}`);
 
   const publishPlugins = resolvePublishPlugins(options.plugins ?? DEFAULT_PUBLISH_PLUGINS, workspace.root, { requireGitPlugin: !dryRun });
   const analyzeCommitsConfig = options.analyzeCommits ?? {};
@@ -59,15 +59,19 @@ export async function detachWorkspaceRelease(options: ReleaseWorkspaceOptions): 
     return { released: state !== null, version: state?.nextRelease.version, result: state };
   });
 
-  const packages: PackageReleaseOutcome[] = entries.map((entry) => ({
-    name: entry.name,
-    directory: entry.directory,
-    released: entry.result !== null,
-    version: entry.result?.nextRelease.version,
-    gitTag: entry.result?.nextRelease.gitTag,
-    type: entry.result?.nextRelease.type,
-    dependencyBumps: entry.dependencyBumps,
-  }));
+  const packages: PackageReleaseOutcome[] = entries.map((entry) =>
+    entry.result === null
+      ? { name: entry.name, directory: entry.directory, released: false, dependencyBumps: entry.dependencyBumps }
+      : {
+          name: entry.name,
+          directory: entry.directory,
+          released: true,
+          version: entry.result.nextRelease.version,
+          gitTag: entry.result.nextRelease.gitTag,
+          type: entry.result.nextRelease.type,
+          dependencyBumps: entry.dependencyBumps,
+        },
+  );
 
   const detached: DetachedPackageRelease[] = entries.map((entry) => ({
     name: entry.name,
@@ -172,9 +176,6 @@ export async function resumeWorkspaceRelease(options: ResumeWorkspaceReleaseOpti
         name: entry.name,
         directory: resolve(root, entry.relativeDirectory),
         released: false,
-        version: undefined,
-        gitTag: undefined,
-        type: undefined,
         dependencyBumps: entry.dependencyBumps,
       });
       continue;
@@ -188,7 +189,7 @@ export async function resumeWorkspaceRelease(options: ResumeWorkspaceReleaseOpti
     } catch (cause) {
       throw new WorkspaceReleaseError(`Resuming ${entry.name} failed: ${cause instanceof Error ? cause.message : String(cause)}`);
     }
-    log(`${entry.name}: published ${entry.state.nextRelease.gitTag} (${releases.length} publish plugin${releases.length === 1 ? '' : 's'} ran)`);
+    log(`${entry.name}: published ${entry.state.nextRelease.gitTag} (${String(releases.length)} publish plugin${releases.length === 1 ? '' : 's'} ran)`);
 
     packages.push({
       name: entry.name,
