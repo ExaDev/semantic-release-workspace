@@ -35,7 +35,7 @@ export class GitCommandError extends WorkspaceReleaseError {
   readonly exitCode: number | undefined;
 
   constructor(args: readonly string[], cwd: string, exitCode: number | undefined, detail: string) {
-    super(`git ${args.join(' ')} failed in ${cwd}${exitCode === undefined ? '' : ` (exit ${exitCode})`}: ${detail}`);
+    super(`git ${args.join(' ')} failed in ${cwd}${exitCode === undefined ? '' : ` (exit ${String(exitCode)})`}: ${detail}`);
     this.exitCode = exitCode;
   }
 }
