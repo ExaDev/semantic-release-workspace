@@ -1,3 +1,13 @@
+## [1.3.6](https://github.com/ExaDev/semantic-release-workspace/compare/v1.3.5...v1.3.6) (2026-09-14)
+
+
+### Bug Fixes
+
+* **manifest:** drop a redundant fallback on an always-populated errors array ([02fe5e7](https://github.com/ExaDev/semantic-release-workspace/commit/02fe5e7fb0b8a8855008a1fb3d7ab512c835c6ae))
+* **plugins:** narrow semantic-release's undertyped lastRelease shape ([ff601b0](https://github.com/ExaDev/semantic-release-workspace/commit/ff601b0d2e6a195187c84b437315bdb7b27f34c9))
+* **release:** model PackageReleaseOutcome's released fields as a union ([8b45cd7](https://github.com/ExaDev/semantic-release-workspace/commit/8b45cd78268e6e3d178c79c6d4688e28e9883f9c))
+* stringify numeric values interpolated into log and error text ([eae0d21](https://github.com/ExaDev/semantic-release-workspace/commit/eae0d21837a7bf6a5ab5a750a09de252ace4f363))
+
 ## [1.3.5](https://github.com/ExaDev/semantic-release-workspace/compare/v1.3.4...v1.3.5) (2026-09-14)
 
 ## [1.3.4](https://github.com/ExaDev/semantic-release-workspace/compare/v1.3.3...v1.3.4) (2026-09-14)
