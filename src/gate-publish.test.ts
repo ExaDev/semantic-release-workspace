@@ -8,6 +8,7 @@ import { type FixturePackage, createWorkspaceFixture } from './git-workspace-fix
 import { isJsonObject, isUnknownArray } from './json';
 import { type PublishPluginSpec } from './plugins';
 import { releaseWorkspace } from './release';
+import { TestTimeoutMs } from './test-timeouts';
 
 interface RecordingPlugin {
   readonly modulePath: string;
@@ -15,7 +16,7 @@ interface RecordingPlugin {
 }
 
 /**
- * A real, resolvable ESM plugin module recording every `publish`/`success` call -- not a mock. `PublishPluginSpec` only accepts a module name or file path (not an inline object the way semantic-release's own engine supports, see @exadev/release-gate's test fixtures for that alternative), so this writes a genuine file `resolvePluginModule` resolves via `require.resolve` on its absolute path. Calls are recorded to a plain JSON file on disk, synchronously, rather than an in-memory module-level array: semantic-release's own plugin loader (`await import(...)` deep inside its own compiled internals) and this test file's own re-import of the same path are two separate module registries under vitest's vite-node runtime, so a shared in-memory array written by one is invisible to the other -- confirmed directly, the array read back was always empty despite the real calls genuinely happening. A file on disk has no such ambiguity, and incidentally matches this feature's own real-world shape better: a resume can genuinely run in a different process from the one that recorded a detach.
+ * A real, resolvable ESM plugin module recording every `publish`/`success` call -- not a mock. `PublishPluginSpec` only accepts a module name or file path (not an inline object the way semantic-release's own engine supports, see `@exadev/release-gate`'s test fixtures for that alternative), so this writes a genuine file `resolvePluginModule` resolves via `require.resolve` on its absolute path. Calls are recorded to a plain JSON file on disk, synchronously, rather than an in-memory module-level array: semantic-release's own plugin loader (`await import(...)` deep inside its own compiled internals) and this test file's own re-import of the same path are two separate module registries under vitest's vite-node runtime, so a shared in-memory array written by one is invisible to the other -- confirmed directly, the array read back was always empty despite the real calls genuinely happening. A file on disk has no such ambiguity, and incidentally matches this feature's own real-world shape better: a resume can genuinely run in a different process from the one that recorded a detach.
  */
 async function writeRecordingPlugin(dir: string): Promise<RecordingPlugin> {
   const modulePath = join(dir, 'recording-plugin.js');
@@ -124,14 +125,14 @@ describe('gatePublish against a real git workspace', () => {
       ]);
 
       const finalCalls = await readRecordingPluginCalls(recordingPlugin);
-      expect(finalCalls.publish).toHaveLength(3);
-      expect(finalCalls.success).toHaveLength(3);
+      expect(finalCalls.publish).toHaveLength(chainPackages.length);
+      expect(finalCalls.success).toHaveLength(chainPackages.length);
       // Published in the same topological order the detach pass tagged them in, not re-derived and not reversed.
       expect(finalCalls.publish.map((call) => call.version)).toEqual(['1.1.0', '1.0.1', '1.0.1']);
     } finally {
       await fixture.remove();
     }
-  }, 240_000);
+  }, TestTimeoutMs.Long);
 
   it('rejects gatePublish combined with commitStrategy "single" before touching git', async () => {
     const fixture = await createWorkspaceFixture(chainPackages, [
@@ -151,7 +152,7 @@ describe('gatePublish against a real git workspace', () => {
     } finally {
       await fixture.remove();
     }
-  }, 60_000);
+  }, TestTimeoutMs.Medium);
 
   it('resumeWorkspaceRelease reports "no release to resume" for a package the detach pass found nothing to release for', async () => {
     const fixture = await createWorkspaceFixture(chainPackages, [
@@ -182,5 +183,5 @@ describe('gatePublish against a real git workspace', () => {
     } finally {
       await fixture.remove();
     }
-  }, 240_000);
+  }, TestTimeoutMs.Long);
 });

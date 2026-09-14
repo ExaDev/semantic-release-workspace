@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { GitCommandError, WorkspaceStateError } from './errors';
 import { changedPathsSince, createTag, currentBranch, git, pushHead, pushHeadAndTags, resolveCommitIdentity } from './git';
 import { createWorkspaceFixture } from './git-workspace-fixture';
+import { TestTimeoutMs } from './test-timeouts';
 
 /** One package is enough for every git-level behaviour here: these tests are about the repository, not about the workspace's shape. */
 const onePackage = [{ name: '@fixture/only', version: '1.0.0' }] as const;
@@ -71,7 +72,7 @@ describe('pushHeadAndTags', () => {
       await fixture.remove();
     }
     // 20s, not the file's default: two full workspace fixtures (each its own git init, bare remote, and initial push) run here, tight against the default budget under the disk and process contention a full concurrent suite run adds.
-  }, 20_000);
+  }, TestTimeoutMs.Short);
 });
 
 describe('resolveCommitIdentity', () => {

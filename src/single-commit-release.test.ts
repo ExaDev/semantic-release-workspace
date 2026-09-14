@@ -7,9 +7,10 @@ import { type FixturePackage, createWorkspaceFixture } from './git-workspace-fix
 import { isJsonObject } from './json';
 import { type PublishPluginSpec } from './plugins';
 import { releaseWorkspace } from './release';
+import { TestTimeoutMs } from './test-timeouts';
 
 /**
- * @semantic-release/changelog and @semantic-release/npm (with npmPublish false) are enough to exercise the real "prepare" path (version bump + changelog write) and the real "publish"/"verifyConditions" path (both skip real registry/network calls when npmPublish is false, exactly like release.test.ts's own FIXTURE_PLUGINS) without ever touching the npm registry or GitHub. @semantic-release/git is deliberately absent: commitStrategy "single" rejects it outright (see the dedicated test below).
+ * `@semantic-release/changelog` and `@semantic-release/npm` (with npmPublish false) are enough to exercise the real "prepare" path (version bump + changelog write) and the real "publish"/"verifyConditions" path (both skip real registry/network calls when npmPublish is false, exactly like release.test.ts's own FIXTURE_PLUGINS) without ever touching the npm registry or GitHub. `@semantic-release/git` is deliberately absent: commitStrategy "single" rejects it outright (see the dedicated test below).
  */
 const SINGLE_FIXTURE_PLUGINS: readonly PublishPluginSpec[] = ['@semantic-release/changelog', ['@semantic-release/npm', { npmPublish: false }]];
 
@@ -102,7 +103,7 @@ describe('releaseWorkspace with commitStrategy "single"', () => {
     } finally {
       await fixture.remove();
     }
-  }, 240_000);
+  }, TestTimeoutMs.Long);
 
   it('releases only the package with changes; the packages upstream of it release nothing and nothing is committed for them', async () => {
     const fixture = await createWorkspaceFixture(chainPackages, [
@@ -122,7 +123,7 @@ describe('releaseWorkspace with commitStrategy "single"', () => {
     } finally {
       await fixture.remove();
     }
-  }, 240_000);
+  }, TestTimeoutMs.Long);
 
   it('reports the same cascade in a dry run, including the forced dependency patches, without writing, committing, tagging, or pushing anything', async () => {
     const fixture = await createWorkspaceFixture(chainPackages, [
@@ -148,7 +149,7 @@ describe('releaseWorkspace with commitStrategy "single"', () => {
     } finally {
       await fixture.remove();
     }
-  }, 240_000);
+  }, TestTimeoutMs.Long);
 
   it('finds nothing to release, and makes no commit at all, on a second run over already-released state', async () => {
     const fixture = await createWorkspaceFixture(chainPackages, [
@@ -169,7 +170,7 @@ describe('releaseWorkspace with commitStrategy "single"', () => {
     } finally {
       await fixture.remove();
     }
-  }, 240_000);
+  }, TestTimeoutMs.Long);
 
   it('rejects @semantic-release/git in the plugin list, since this mode does its own committing', async () => {
     const fixture = await createWorkspaceFixture(chainPackages, []);
@@ -183,13 +184,13 @@ describe('releaseWorkspace with commitStrategy "single"', () => {
       await expect(failure).rejects.toBeInstanceOf(ReleaseConfigurationError);
       await expect(failure).rejects.toThrow(/@semantic-release\/git/);
 
-      // Nothing published: the run fails before analysis even starts.
+      // Nothing published: the run fails before analysis even starts -- one "scaffold workspace" commit plus one per chainPackages entry (see createWorkspaceFixture).
       const log = await git(['log', '--oneline', 'main'], { cwd: fixture.root });
-      expect(log.split('\n').filter(Boolean)).toHaveLength(4);
+      expect(log.split('\n').filter(Boolean)).toHaveLength(chainPackages.length + 1);
     } finally {
       await fixture.remove();
     }
-  }, 60_000);
+  }, TestTimeoutMs.Medium);
 });
 
 async function readManifest(root: string, packageName: string): Promise<Record<string, unknown>> {
