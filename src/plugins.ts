@@ -22,11 +22,16 @@ export interface DependencyBump {
 
 /** What the scoped plugins need to know about bumps recorded so far in the run, for the package they are about to analyse. */
 export interface DependencyBumpSource {
-  bumpsFor(dependent: string): readonly DependencyBump[];
+  bumpsFor: (dependent: string) => readonly DependencyBump[];
 }
 
 /** A publish-pipeline plugin entry as the orchestrator accepts it: a module name, optionally with a config object. */
 export type PublishPluginSpec = string | readonly [string] | readonly [string, Record<string, unknown>];
+
+/** semantic-release's own `getLastRelease` returns `{}` for a package with no prior tag -- not `undefined`, and not a fully-populated `LastRelease` -- contradicting the `gitHead: string` its own type declares. Narrows structurally rather than trusting that declared type, so a first-release context's `lastRelease` (correctly, at runtime) never claims a `gitHead` it does not have. */
+function hasGitHead(lastRelease: unknown): lastRelease is { readonly gitHead: string } {
+  return typeof lastRelease === 'object' && lastRelease !== null && 'gitHead' in lastRelease && typeof lastRelease.gitHead === 'string';
+}
 
 /** The standard publish pipeline this orchestrator coordinates when a workspace configures none of its own. Every entry reuses the corresponding official plugin -- the orchestrator scopes and sequences them per package, it does not reimplement npm publishing, GitHub release creation, or changelog writing. */
 export const DEFAULT_PUBLISH_PLUGINS: readonly PublishPluginSpec[] = [
@@ -43,7 +48,7 @@ export const DEFAULT_PUBLISH_PLUGINS: readonly PublishPluginSpec[] = [
   ],
 ];
 
-/** The standard publish pipeline for `commitStrategy: 'single'`: the same as `DEFAULT_PUBLISH_PLUGINS` minus @semantic-release/git, which that mode never runs -- see `resolvePublishPlugins`'s `forbidGitPlugin` option for why it is rejected outright rather than merely unused. Single-commit mode does its own committing (one combined commit for every released package), so a `prepare`-step git plugin here would create the very per-package commits that mode exists to avoid. */
+/** The standard publish pipeline for `commitStrategy: 'single'`: the same as `DEFAULT_PUBLISH_PLUGINS` minus `@semantic-release/git`, which that mode never runs -- see `resolvePublishPlugins`'s `forbidGitPlugin` option for why it is rejected outright rather than merely unused. Single-commit mode does its own committing (one combined commit for every released package), so a `prepare`-step git plugin here would create the very per-package commits that mode exists to avoid. */
 export const SINGLE_COMMIT_DEFAULT_PUBLISH_PLUGINS: readonly PublishPluginSpec[] = ['@semantic-release/changelog', '@semantic-release/npm', '@semantic-release/github'];
 
 const STEP_PLUGINS_THE_ORCHESTRATOR_OWNS: ReadonlySet<string> = new Set(['@semantic-release/commit-analyzer', '@semantic-release/release-notes-generator']);
@@ -56,7 +61,7 @@ export interface ScopedPlugins {
 /**
  * Builds the per-package `analyzeCommits` and `generateNotes` functions handed to semantic-release as inline plugins.
  *
- * Both apply the same path scoping before delegating to the real @semantic-release/commit-analyzer and @semantic-release/release-notes-generator: the commit list semantic-release already fetched for the release range is filtered down to commits whose `git log --name-only` file list intersects the package's own directory, and only the filtered list reaches the standard plugin. Conventional-commit parsing and changelog formatting stay entirely inside the standard plugins.
+ * Both apply the same path scoping before delegating to the real `@semantic-release/commit-analyzer` and `@semantic-release/release-notes-generator`: the commit list semantic-release already fetched for the release range is filtered down to commits whose `git log --name-only` file list intersects the package's own directory, and only the filtered list reaches the standard plugin. Conventional-commit parsing and changelog formatting stay entirely inside the standard plugins.
  *
  * The `analyzeCommits` wrapper carries one addition beyond filtering: when the standard analyzer finds no releasable commits but a workspace dependency range of the package's has changed, it returns 'patch' anyway. A dependent whose only change is a dependency bump still needs a release for that range to reach the registry. "Has changed" is read from two sources, merged: bumps recorded in memory earlier in the current run (`scope.bumps`), and bumps recorded in the package's own filtered commit history via the trailer `dependency-bump-commit.ts` writes and reads -- the latter is what lets a run that starts after a previous run already committed and pushed the bump (a crash recovery, or simply a later run) reach the same decision, rather than depending on state that existed only inside the process that made the commit.
  */
@@ -72,8 +77,8 @@ export function createScopedPlugins(scope: {
   let cached: { readonly from: string | undefined; readonly paths: Promise<Map<string, ReadonlySet<string>>> } | undefined;
 
   async function commitsForPackage(context: AnalyzeCommitsContext & { cwd: string }): Promise<readonly Commit[]> {
-    // An absent lastRelease means semantic-release fetched the package's whole history, so the path map is built over the same unbounded range.
-    const from = context.lastRelease?.gitHead ?? undefined;
+    // A lastRelease with no gitHead means semantic-release fetched the package's whole history, so the path map is built over the same unbounded range.
+    const from = hasGitHead(context.lastRelease) ? context.lastRelease.gitHead : undefined;
     // Two branches, not `cached === undefined || cached.from !== from`: when this is the very first call for a package with no prior release, both `cached` and `from` are `undefined`, and a single optional-chained comparison cannot distinguish "nothing cached yet" from "cached, and it happens to match".
     if (cached === undefined) {
       cached = { from, paths: changedPathsSince(from, { cwd: context.cwd }) };
@@ -89,7 +94,7 @@ export function createScopedPlugins(scope: {
     async analyzeCommits(_pluginConfig, context) {
       const commits = await commitsForPackage(context);
       const type = await analyzeCommits(scope.analyzeCommitsConfig, { ...context, commits });
-      if (type) {
+      if (typeof type === 'string') {
         return type;
       }
       const bumps = mergeDependencyBumps(scope.bumps.bumpsFor(scope.pkg.name), commits);
@@ -97,7 +102,7 @@ export function createScopedPlugins(scope: {
         return false;
       }
       context.logger.log(
-        `No releasable commits under ${scope.pkg.relativeDirectory}, but ${bumps.length === 1 ? 'a workspace dependency range changed' : `${bumps.length} workspace dependency ranges changed`}; forcing a patch release.`,
+        `No releasable commits under ${scope.pkg.relativeDirectory}, but ${bumps.length === 1 ? 'a workspace dependency range changed' : `${String(bumps.length)} workspace dependency ranges changed`}; forcing a patch release.`,
       );
       return 'patch';
     },
@@ -110,7 +115,7 @@ export function createScopedPlugins(scope: {
         return notes;
       }
       const section = ['### Dependencies', '', ...bumps.map((bump) => describeDependencyBump(bump))].join('\n');
-      return notes ? `${notes}\n\n${section}` : section;
+      return typeof notes === 'string' ? `${notes}\n\n${section}` : section;
     },
   };
 }
@@ -202,7 +207,7 @@ export function resolvePublishPlugins(
 /**
  * Resolves a plugin module name to an absolute file path, first from this tool's own module context (its peer dependencies, which every workspace installing the orchestrator must provide) and then from the workspace root (a workspace's own plugin dependencies, such as a custom changelog plugin). Both bases are named in the error when neither can resolve the name.
  */
-function resolvePluginModule(name: string, requireFromTool: NodeRequire, requireFromWorkspace: NodeRequire): string {
+function resolvePluginModule(name: string, requireFromTool: NodeJS.Require, requireFromWorkspace: NodeJS.Require): string {
   const attempts: string[] = [];
   for (const [label, requirer] of [
     ['this tool', requireFromTool],
