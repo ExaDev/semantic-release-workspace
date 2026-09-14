@@ -1,5 +1,5 @@
 /**
- * @exadev/semantic-release-workspace -- independent per-package semantic-release orchestration for pnpm workspaces, without lockstep versioning.
+ * `@exadev/semantic-release-workspace` -- independent per-package semantic-release orchestration for pnpm workspaces, without lockstep versioning.
  *
  * The public programmatic surface: discover a workspace and its inter-package dependency graph, order it topologically, rewrite dependency ranges when a sibling releases, and drive the whole release run. `releaseWorkspace` composes all of it; the individual pieces are exported so an embedder can inspect or reuse any stage.
  */
