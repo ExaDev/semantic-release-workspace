@@ -1,11 +1,5 @@
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import { GitCommandError, WorkspaceStateError } from './errors';
-
-const execFileAsync = promisify(execFile);
-
-/** `git log --name-only` over everything since a package's last release tag can legitimately produce tens of megabytes of path output on a long-lived monorepo, well past execFile's default buffer, failing on exactly the big workspaces this tool exists for. */
-const GIT_MAX_BUFFER_BYTES = 100 * 1024 * 1024;
+import { execFile } from './exec-file';
 
 /** Separates one commit's record in `git log --format` output. Chosen from the C0 control range so it can never appear in a hash or a file path. */
 const COMMIT_RECORD_SEPARATOR = '\x1e';
@@ -39,17 +33,22 @@ const GIT_REPOSITORY_DISCOVERY_ENV_KEYS: readonly string[] = [
 export function sanitizeGitEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const sanitized = { ...env };
   for (const key of GIT_REPOSITORY_DISCOVERY_ENV_KEYS) {
-    delete sanitized[key];
+    Reflect.deleteProperty(sanitized, key);
   }
   return sanitized;
 }
 
 const SANITIZED_PROCESS_GIT_ENV = sanitizeGitEnv(process.env);
 
+/** `git log --name-only` over everything since a package's last release tag can legitimately produce tens of megabytes of path output on a long-lived monorepo, well past execFile's default buffer, failing on exactly the big workspaces this tool exists for -- hence the generous 100 MiB default, rather than execFile's own. */
+async function execGit(args: readonly string[], cwd: string, maxBuffer = 104_857_600): Promise<string> {
+  const { stdout } = await execFile('git', args, { cwd, maxBuffer, env: SANITIZED_PROCESS_GIT_ENV });
+  return stdout;
+}
+
 export async function git(args: readonly string[], options: GitCommandOptions): Promise<string> {
   try {
-    const { stdout } = await execFileAsync('git', [...args], { cwd: options.cwd, maxBuffer: GIT_MAX_BUFFER_BYTES, env: SANITIZED_PROCESS_GIT_ENV });
-    return stdout;
+    return await execGit(args, options.cwd);
   } catch (cause) {
     throw toGitCommandError(args, options.cwd, cause);
   }
@@ -141,6 +140,11 @@ export async function createTag(name: string, ref: string, options: GitCommandOp
   await git(['tag', name, ref], options);
 }
 
+/** A `git status --porcelain=v1 -z` entry is a 2-character status code, a single space, then the path -- `PathOffset` characters of fixed prefix before any path content. An entry with nothing past that offset (too short to carry a real status+path pair) slices down to an empty path, which is filtered out the same way as any other non-entry token. */
+const enum PorcelainEntryFormat {
+  PathOffset = 3,
+}
+
 /**
  * Lists every path with a working-tree or index change (modified, added, deleted, untracked), repository-root-relative, via `git status --porcelain=v1 -z`. `commitStrategy: 'single'` uses this rather than predicting which files each configured prepare plugin touched (a version bump, a changelog write, a dependency-range rewrite, a regenerated lockfile) by name: asking git what actually changed is correct regardless of which prepare plugins are configured or how they name their own output files.
  *
@@ -152,11 +156,15 @@ export async function workingTreeChanges(options: GitCommandOptions): Promise<re
   const paths: string[] = [];
   for (let index = 0; index < tokens.length; index += 1) {
     const entry = tokens[index];
-    if (entry === undefined || entry.length < 4) {
+    if (entry === undefined) {
       continue;
     }
     const statusCode = entry.slice(0, 2);
-    paths.push(entry.slice(3));
+    const path = entry.slice(PorcelainEntryFormat.PathOffset);
+    if (path === '') {
+      continue;
+    }
+    paths.push(path);
     if (statusCode.includes('R') || statusCode.includes('C')) {
       // The origin path of a rename/copy occupies the next token; it names a path that no longer exists (or, for a copy, is unrelated to the new content) and must not be added as if it were itself changed content to commit.
       index += 1;

@@ -1,8 +1,5 @@
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import { PnpmCommandError } from './errors';
-
-const execFileAsync = promisify(execFile);
+import { execFile } from './exec-file';
 
 export interface PnpmCommandOptions {
   readonly cwd: string;
@@ -15,7 +12,7 @@ export interface PnpmCommandOptions {
  */
 export async function regenerateLockfile(options: PnpmCommandOptions): Promise<void> {
   try {
-    await execFileAsync('pnpm', ['install', '--lockfile-only'], { cwd: options.cwd });
+    await execFile('pnpm', ['install', '--lockfile-only'], { cwd: options.cwd });
   } catch (cause) {
     const stderr = cause instanceof Error && 'stderr' in cause && typeof cause.stderr === 'string' ? cause.stderr.trim() : '';
     const detail = stderr !== '' ? stderr : cause instanceof Error ? cause.message : String(cause);

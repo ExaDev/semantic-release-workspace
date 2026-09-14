@@ -1,12 +1,9 @@
-import { execFile } from 'node:child_process';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { promisify } from 'node:util';
 import { git } from './git';
-
-const execFileAsync = promisify(execFile);
+import { regenerateLockfile } from './pnpm';
 
 /**
  * Builds a throwaway pnpm workspace with a real git repository, a real bare remote, real commits, and real `name@version` tags -- the substrate the orchestrator's tests drive end to end. The orchestrator's own discovery reads only `pnpm-workspace.yaml` and manifests and never invokes pnpm itself, but `bumpDependents`'s lockfile regeneration does, so a dependency-range bump against this fixture runs a real `pnpm install --lockfile-only`.
@@ -91,7 +88,7 @@ export async function createWorkspaceFixture(
   }
 
   if (options.pnpmLockfile === true) {
-    await execFileAsync('pnpm', ['install', '--lockfile-only'], { cwd: root });
+    await regenerateLockfile({ cwd: root });
     await commit(root, 'chore: lockfile', ['pnpm-lock.yaml']);
   }
 
@@ -112,7 +109,7 @@ export async function createWorkspaceFixture(
   await git(['push', '-u', 'origin', 'main', '--tags'], { cwd: root });
 
   // maxRetries/retryDelay: `git push`/`git commit` can leave a background `git gc --auto` still writing into `remote.git/objects` or `.git/objects` for a moment after the command that triggered it returns, which occasionally loses the race against this recursive delete with ENOTEMPTY -- exactly the error class Node's own retry option exists for.
-  return { root, remote, remove: () => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }) };
+  return { root, remote, remove: async () => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }) };
 }
 
 async function commit(root: string, message: string, paths: readonly string[]): Promise<void> {
