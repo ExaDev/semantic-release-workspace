@@ -8,13 +8,14 @@ import { WorkspaceReleaseError } from './errors';
 import { isDetachedPackageReleaseArray, resumeWorkspaceRelease } from './gate-publish';
 import { isJsonObject, isStringArray, isUnknownArray } from './json';
 import { packageName } from './package-name';
-import { type PublishPluginSpec } from './plugins';
+import { type PackagePluginSpecs, type PublishPluginSpec } from './plugins';
 import { releaseWorkspace, type CommitStrategy, type PackageReleaseOutcome } from './release';
 
 const CONFIG_OPTION_KEYS: ReadonlySet<string> = new Set([
   'dryRun',
   'branches',
   'plugins',
+  'packagePlugins',
   'analyzeCommits',
   'generateNotes',
   'commitStrategy',
@@ -62,7 +63,7 @@ export function createProgram(): Command {
   );
   release.option(
     '--config <file>',
-    'config file (.json, .yaml, .yml, .js, .cjs, or .ts) providing any of the release options (dryRun, branches, plugins, analyzeCommits, generateNotes, commitStrategy, gatePublish); explicit flags win',
+    'config file (.json, .yaml, .yml, .js, .cjs, or .ts) providing any of the release options (dryRun, branches, plugins, packagePlugins, analyzeCommits, generateNotes, commitStrategy, gatePublish); explicit flags win',
   );
   release.action(runRelease);
 
@@ -99,6 +100,7 @@ const NO_CONFIG_FILE: ReleaseConfigFile = {
   dryRun: undefined,
   branches: undefined,
   plugins: undefined,
+  packagePlugins: undefined,
   analyzeCommits: undefined,
   generateNotes: undefined,
   commitStrategy: undefined,
@@ -118,6 +120,8 @@ async function runRelease(flags: ReleaseFlags): Promise<void> {
     branches: flags.branches.length > 0 ? flags.branches : file.branches,
     // No `?? DEFAULT_PUBLISH_PLUGINS` fallback here: which default plugin list applies depends on commitStrategy (git is part of the default for "per-package", forbidden for "single"), so an unset `plugins` is passed straight through and `releaseWorkspace` picks the right default for whichever strategy is in effect.
     plugins: flags.plugin.length > 0 ? flags.plugin.map((spec) => parsePluginSpec(spec)) : file.plugins,
+    // Config file only: per-package lists are keyed by package name, which a repeatable flag has no natural shape for.
+    packagePlugins: file.packagePlugins,
     analyzeCommits: flags.analyzeCommits === undefined ? file.analyzeCommits : parseJsonObjectFlag(flags.analyzeCommits, '--analyze-commits'),
     generateNotes: flags.generateNotes === undefined ? file.generateNotes : parseJsonObjectFlag(flags.generateNotes, '--generate-notes'),
     commitStrategy: flags.commitStrategy ?? file.commitStrategy,
@@ -204,6 +208,7 @@ export interface ReleaseConfigFile {
   readonly dryRun: boolean | undefined;
   readonly branches: readonly string[] | undefined;
   readonly plugins: readonly PublishPluginSpec[] | undefined;
+  readonly packagePlugins: PackagePluginSpecs | undefined;
   readonly analyzeCommits: Record<string, unknown> | undefined;
   readonly generateNotes: Record<string, unknown> | undefined;
   readonly commitStrategy: CommitStrategy | undefined;
@@ -237,7 +242,7 @@ export async function readReleaseConfigFile(path: string): Promise<ReleaseConfig
     }
   }
 
-  const { dryRun, branches, plugins, analyzeCommits, generateNotes, commitStrategy, gatePublish } = parsed;
+  const { dryRun, branches, plugins, packagePlugins, analyzeCommits, generateNotes, commitStrategy, gatePublish } = parsed;
   if (dryRun !== undefined && typeof dryRun !== 'boolean') {
     throw new InvalidArgumentError(`--config file ${path}: "dryRun" must be a boolean`);
   }
@@ -246,6 +251,9 @@ export async function readReleaseConfigFile(path: string): Promise<ReleaseConfig
   }
   if (plugins !== undefined && !Array.isArray(plugins)) {
     throw new InvalidArgumentError(`--config file ${path}: "plugins" must be an array`);
+  }
+  if (packagePlugins !== undefined && !isJsonObject(packagePlugins)) {
+    throw new InvalidArgumentError(`--config file ${path}: "packagePlugins" must be an object mapping package names to plugin arrays`);
   }
   if (analyzeCommits !== undefined && !isJsonObject(analyzeCommits)) {
     throw new InvalidArgumentError(`--config file ${path}: "analyzeCommits" must be an object`);
@@ -264,6 +272,7 @@ export async function readReleaseConfigFile(path: string): Promise<ReleaseConfig
     dryRun,
     branches,
     plugins: plugins === undefined ? undefined : plugins.map((spec) => parseConfigFilePlugin(spec, path)),
+    packagePlugins: packagePlugins === undefined ? undefined : parseConfigFilePackagePlugins(packagePlugins, path),
     analyzeCommits,
     generateNotes,
     commitStrategy,
@@ -271,14 +280,25 @@ export async function readReleaseConfigFile(path: string): Promise<ReleaseConfig
   };
 }
 
-function parseConfigFilePlugin(spec: unknown, path: string): PublishPluginSpec {
+function parseConfigFilePackagePlugins(packagePlugins: Record<string, unknown>, path: string): PackagePluginSpecs {
+  const parsed: Record<string, readonly PublishPluginSpec[]> = {};
+  for (const [name, list] of Object.entries(packagePlugins)) {
+    if (!Array.isArray(list)) {
+      throw new InvalidArgumentError(`--config file ${path}: the "packagePlugins" entry for "${name}" must be an array`);
+    }
+    parsed[name] = list.map((spec: unknown) => parseConfigFilePlugin(spec, path, 'packagePlugins'));
+  }
+  return parsed;
+}
+
+function parseConfigFilePlugin(spec: unknown, path: string, key = 'plugins'): PublishPluginSpec {
   if (typeof spec === 'string') {
     return spec;
   }
   if (isPluginSpecTuple(spec)) {
     return spec;
   }
-  throw new InvalidArgumentError(`--config file ${path}: each "plugins" entry must be a module name or a [name, config] array`);
+  throw new InvalidArgumentError(`--config file ${path}: each "${key}" entry must be a module name or a [name, config] array`);
 }
 
 function parseJson(raw: string, flag: string): unknown {

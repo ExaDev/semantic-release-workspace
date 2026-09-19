@@ -2,12 +2,13 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { formatDependencyBumpMessage } from './dependency-bump-commit';
-import { DependencyCycleError, UnsupportedDependencyRangeError } from './errors';
+import { DependencyCycleError, ReleaseConfigurationError, UnsupportedDependencyRangeError } from './errors';
 import { git } from './git';
 import { type FixturePackage, createWorkspaceFixture } from './git-workspace-fixture';
 import { isJsonObject } from './json';
 import { writeDependencyRange } from './manifest';
 import { type PublishPluginSpec } from './plugins';
+import { createRecordingPlugin, readRecordingPluginCalls } from './recording-plugin-fixture';
 import { releaseWorkspace } from './release';
 import { TestTimeoutMs } from './test-timeouts';
 
@@ -425,6 +426,72 @@ describe('releaseWorkspace against a real git workspace', () => {
       await fixture.remove();
     }
   }, TestTimeoutMs.Long);
+
+  it('lets a package override the publish plugins: a private package without the recording plugin still gets its tag, version bump and dependency cascade, and publishes nothing', async () => {
+    const fixture = await createWorkspaceFixture(
+      [
+        { name: '@fixture/a', version: '1.0.0', private: false },
+        { name: '@fixture/b', version: '1.0.0', private: true, dependencies: { '@fixture/a': '^1.0.0' } },
+        { name: '@fixture/c', version: '1.0.0', private: false, dependencies: { '@fixture/b': '^1.0.0' } },
+      ],
+      [{ message: 'feat(a): second feature', files: { 'packages/a/src/index.js': 'export const a = 2;\n' } }],
+    );
+    // Stands in for @semantic-release/github, which needs network access and a token: a plugin that records every publish, so the test can see exactly which packages the workspace-wide list reached.
+    const recording = await createRecordingPlugin();
+    try {
+      const outcome = await releaseWorkspace({
+        root: fixture.root,
+        env: releaseEnv(),
+        plugins: [...FIXTURE_PLUGINS, recording.modulePath],
+        packagePlugins: { '@fixture/b': FIXTURE_PLUGINS },
+      });
+
+      const byName = new Map(outcome.packages.map((pkg) => [pkg.name, pkg]));
+      expect(byName.get('@fixture/a')).toMatchObject({ released: true, version: '1.1.0' });
+      expect(byName.get('@fixture/b')).toMatchObject({
+        released: true,
+        version: '1.0.1',
+        dependencyBumps: [{ dependent: '@fixture/b', dependency: '@fixture/a', version: '1.1.0', range: '^1.1.0', kind: 'rewritten' }],
+      });
+      expect(byName.get('@fixture/c')).toMatchObject({
+        released: true,
+        version: '1.0.1',
+        dependencyBumps: [{ dependent: '@fixture/c', dependency: '@fixture/b', version: '1.0.1', range: '^1.0.1', kind: 'rewritten' }],
+      });
+
+      // The recorded step ran for the packages on the workspace-wide list and never for the overridden one.
+      const calls = await readRecordingPluginCalls(recording);
+      expect(calls.publish.map((call) => call.name)).toEqual(['@fixture/a@1.1.0', '@fixture/c@1.0.1']);
+      expect(calls.success.map((call) => call.name)).toEqual(['@fixture/a@1.1.0', '@fixture/c@1.0.1']);
+
+      // The overridden package kept everything the release itself provides: its version, its tag on both sides, and the cascade through to its dependent.
+      await expect(manifestVersion(fixture.root, '@fixture/b')).resolves.toBe('1.0.1');
+      await expect(manifestDependency(fixture.root, '@fixture/c', '@fixture/b')).resolves.toBe('^1.0.1');
+      expect((await git(['tag', '--list'], { cwd: fixture.root })).split('\n')).toContain('@fixture/b@1.0.1');
+      expect((await git(['tag', '--list'], { cwd: fixture.remote })).split('\n')).toContain('@fixture/b@1.0.1');
+    } finally {
+      await recording.remove();
+      await fixture.remove();
+    }
+  }, TestTimeoutMs.Long);
+
+  it('rejects a per-package plugin override naming a package that is not in the workspace, before anything releases', async () => {
+    const fixture = await createWorkspaceFixture(chainPackages, [
+      { message: 'feat(a): second feature', files: { 'packages/a/src/index.js': 'export const a = 2;\n' } },
+    ]);
+    try {
+      const headBefore = (await git(['rev-parse', 'HEAD'], { cwd: fixture.root })).trim();
+
+      const failure = releaseWorkspace({ root: fixture.root, env: releaseEnv(), plugins: FIXTURE_PLUGINS, packagePlugins: { '@fixture/typo': FIXTURE_PLUGINS } });
+      await expect(failure).rejects.toBeInstanceOf(ReleaseConfigurationError);
+      await expect(failure).rejects.toThrow('"@fixture/typo"');
+
+      expect((await git(['rev-parse', 'HEAD'], { cwd: fixture.root })).trim()).toBe(headBefore);
+      expect((await git(['tag', '--list'], { cwd: fixture.root })).split('\n').filter(Boolean).sort()).toEqual(['@fixture/a@1.0.0', '@fixture/b@1.0.0', '@fixture/c@1.0.0']);
+    } finally {
+      await fixture.remove();
+    }
+  }, TestTimeoutMs.Medium);
 
   it('rejects an unsupported dependency range before anything releases, not only once the dependency it names has already been published', async () => {
     const fixture = await createWorkspaceFixture(

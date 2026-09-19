@@ -1,62 +1,14 @@
-import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { ReleaseConfigurationError, UnsupportedDependencyRangeError } from './errors';
 import { resumeWorkspaceRelease, type DetachedPackageRelease } from './gate-publish';
 import { git } from './git';
 import { type FixturePackage, createWorkspaceFixture } from './git-workspace-fixture';
-import { isJsonObject, isUnknownArray } from './json';
 import { writeDependencyRange } from './manifest';
 import { type PublishPluginSpec } from './plugins';
+import { readRecordingPluginCalls, writeRecordingPlugin } from './recording-plugin-fixture';
 import { releaseWorkspace } from './release';
 import { TestTimeoutMs } from './test-timeouts';
-
-interface RecordingPlugin {
-  readonly modulePath: string;
-  readonly callsFile: string;
-}
-
-/**
- * A real, resolvable ESM plugin module recording every `publish`/`success` call -- not a mock. `PublishPluginSpec` only accepts a module name or file path (not an inline object the way semantic-release's own engine supports, see `@exadev/release-gate`'s test fixtures for that alternative), so this writes a genuine file `resolvePluginModule` resolves via `require.resolve` on its absolute path. Calls are recorded to a plain JSON file on disk, synchronously, rather than an in-memory module-level array: semantic-release's own plugin loader (`await import(...)` deep inside its own compiled internals) and this test file's own re-import of the same path are two separate module registries under vitest's vite-node runtime, so a shared in-memory array written by one is invisible to the other -- confirmed directly, the array read back was always empty despite the real calls genuinely happening. A file on disk has no such ambiguity, and incidentally matches this feature's own real-world shape better: a resume can genuinely run in a different process from the one that recorded a detach.
- */
-async function writeRecordingPlugin(dir: string): Promise<RecordingPlugin> {
-  const modulePath = join(dir, 'recording-plugin.js');
-  const callsFile = join(dir, 'recording-plugin-calls.json');
-  await writeFile(callsFile, JSON.stringify({ publish: [], success: [] }));
-  await writeFile(
-    modulePath,
-    [
-      "import { readFileSync, writeFileSync } from 'node:fs';",
-      `const CALLS_FILE = ${JSON.stringify(callsFile)};`,
-      'function record(step, entry) {',
-      '  const calls = JSON.parse(readFileSync(CALLS_FILE, "utf8"));',
-      '  calls[step].push(entry);',
-      '  writeFileSync(CALLS_FILE, JSON.stringify(calls));',
-      '}',
-      'export async function publish(pluginConfig, context) {',
-      '  record("publish", { name: context.nextRelease.gitTag, version: context.nextRelease.version });',
-      '  return { name: `recorded-${context.nextRelease.version}` };',
-      '}',
-      'export async function success(pluginConfig, context) {',
-      '  record("success", { version: context.nextRelease.version });',
-      '}',
-      '',
-    ].join('\n'),
-  );
-  return { modulePath, callsFile };
-}
-
-interface RecordedCall {
-  readonly version: string;
-}
-
-async function readRecordingPluginCalls(plugin: RecordingPlugin): Promise<{ readonly publish: readonly RecordedCall[]; readonly success: readonly RecordedCall[] }> {
-  const parsed: unknown = JSON.parse(await readFile(plugin.callsFile, 'utf8'));
-  if (!isJsonObject(parsed) || !isUnknownArray(parsed.publish) || !isUnknownArray(parsed.success)) {
-    throw new Error(`${plugin.callsFile} does not contain a valid calls object.`);
-  }
-  return { publish: parsed.publish as RecordedCall[], success: parsed.success as RecordedCall[] };
-}
 
 /** Matches release.test.ts's own releaseEnv -- see that file for why every recognisable CI service variable is stripped before forcing CI=true. */
 function releaseEnv(): NodeJS.ProcessEnv {
@@ -233,6 +185,50 @@ describe('gatePublish against a real git workspace', () => {
       await expect(failure).rejects.toBeInstanceOf(UnsupportedDependencyRangeError);
       await expect(failure).rejects.toThrow('@fixture/b: "@fixture/a" in dependencies is declared as "workspace:^"');
       expect((await readRecordingPluginCalls(recordingPlugin)).publish).toEqual([]);
+    } finally {
+      await fixture.remove();
+    }
+  }, TestTimeoutMs.Long);
+
+  it('lets a package override the publish plugins: detach tags every package, and resume publishes only through the plugins each package was detached with', async () => {
+    const fixture = await createWorkspaceFixture(
+      [
+        { name: '@fixture/a', version: '1.0.0', private: false },
+        { name: '@fixture/b', version: '1.0.0', private: true, dependencies: { '@fixture/a': '^1.0.0' } },
+        { name: '@fixture/c', version: '1.0.0', private: false, dependencies: { '@fixture/b': '^1.0.0' } },
+      ],
+      [{ message: 'feat(a): second feature', files: { 'packages/a/src/index.js': 'export const a = 2;\n' } }],
+    );
+    try {
+      const recordingPlugin = await writeRecordingPlugin(fixture.root);
+      const overridden: readonly PublishPluginSpec[] = [
+        ['@semantic-release/npm', { npmPublish: false }],
+        ['@semantic-release/git', { assets: ['package.json'], message: 'chore(release): ${nextRelease.gitTag} [skip ci]' }],
+      ];
+
+      const detachOutcome = await releaseWorkspace({
+        root: fixture.root,
+        env: releaseEnv(),
+        plugins: [...overridden, recordingPlugin.modulePath],
+        packagePlugins: { '@fixture/b': overridden },
+        gatePublish: true,
+      });
+      const detached: readonly DetachedPackageRelease[] = detachOutcome.detached ?? [];
+
+      // Every package is tagged and pushed, the overridden one included.
+      expect(detached.map((entry) => [entry.name, entry.state?.nextRelease.version])).toEqual([
+        ['@fixture/a', '1.1.0'],
+        ['@fixture/b', '1.0.1'],
+        ['@fixture/c', '1.0.1'],
+      ]);
+      const remoteTags = (await git(['tag', '--list'], { cwd: fixture.remote })).split('\n');
+      expect(remoteTags).toEqual(expect.arrayContaining(['@fixture/a@1.1.0', '@fixture/b@1.0.1', '@fixture/c@1.0.1']));
+
+      // The resume rebuilds each package's pipeline from the state it was detached with, so the override survives into a separate process.
+      await resumeWorkspaceRelease({ root: fixture.root, env: releaseEnv(), detached });
+      const calls = await readRecordingPluginCalls(recordingPlugin);
+      expect(calls.publish.map((call) => call.name)).toEqual(['@fixture/a@1.1.0', '@fixture/c@1.0.1']);
+      expect(calls.success.map((call) => call.name)).toEqual(['@fixture/a@1.1.0', '@fixture/c@1.0.1']);
     } finally {
       await fixture.remove();
     }

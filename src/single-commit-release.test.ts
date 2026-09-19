@@ -6,6 +6,7 @@ import { git } from './git';
 import { type FixturePackage, createWorkspaceFixture } from './git-workspace-fixture';
 import { isJsonObject } from './json';
 import { type PublishPluginSpec } from './plugins';
+import { createRecordingPlugin, readRecordingPluginCalls } from './recording-plugin-fixture';
 import { releaseWorkspace } from './release';
 import { TestTimeoutMs } from './test-timeouts';
 
@@ -214,6 +215,45 @@ describe('releaseWorkspace with commitStrategy "single"', () => {
       await fixture.remove();
     }
   }, TestTimeoutMs.Medium);
+
+  it('lets a package override the publish plugins: a private package without the recording plugin still gets its tag, version bump and dependency cascade, and publishes nothing', async () => {
+    const fixture = await createWorkspaceFixture(
+      [
+        { name: '@fixture/a', version: '1.0.0', private: false },
+        { name: '@fixture/b', version: '1.0.0', private: true, dependencies: { '@fixture/a': '^1.0.0' } },
+        { name: '@fixture/c', version: '1.0.0', private: false, dependencies: { '@fixture/b': '^1.0.0' } },
+      ],
+      [{ message: 'feat(a): second feature', files: { 'packages/a/src/index.js': 'export const a = 2;\n' } }],
+    );
+    // Stands in for @semantic-release/github, which needs network access and a token. Kept outside the fixture repository: this mode refuses to start on a dirty working tree.
+    const recording = await createRecordingPlugin();
+    try {
+      const outcome = await releaseWorkspace({
+        root: fixture.root,
+        env: releaseEnv(),
+        plugins: [...SINGLE_FIXTURE_PLUGINS, recording.modulePath],
+        packagePlugins: { '@fixture/b': SINGLE_FIXTURE_PLUGINS },
+        commitStrategy: 'single',
+      });
+
+      const byName = new Map(outcome.packages.map((pkg) => [pkg.name, pkg]));
+      expect(byName.get('@fixture/a')).toMatchObject({ released: true, version: '1.1.0' });
+      expect(byName.get('@fixture/b')).toMatchObject({ released: true, version: '1.0.1' });
+      expect(byName.get('@fixture/c')).toMatchObject({ released: true, version: '1.0.1' });
+
+      const calls = await readRecordingPluginCalls(recording);
+      expect(calls.publish.map((call) => call.name)).toEqual(['@fixture/a@1.1.0', '@fixture/c@1.0.1']);
+      expect(calls.success.map((call) => call.name)).toEqual(['@fixture/a@1.1.0', '@fixture/c@1.0.1']);
+
+      await expect(manifestVersion(fixture.root, '@fixture/b')).resolves.toBe('1.0.1');
+      await expect(manifestDependency(fixture.root, '@fixture/c', '@fixture/b')).resolves.toBe('^1.0.1');
+      const remoteTags = (await git(['tag', '--list'], { cwd: fixture.remote })).split('\n');
+      expect(remoteTags).toEqual(expect.arrayContaining(['@fixture/a@1.1.0', '@fixture/b@1.0.1', '@fixture/c@1.0.1']));
+    } finally {
+      await recording.remove();
+      await fixture.remove();
+    }
+  }, TestTimeoutMs.Long);
 });
 
 async function readManifest(root: string, packageName: string): Promise<Record<string, unknown>> {

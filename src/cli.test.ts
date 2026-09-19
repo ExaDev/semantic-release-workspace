@@ -123,6 +123,30 @@ describe('readReleaseConfigFile', () => {
     await expect(readReleaseConfigFile(path)).rejects.toThrow(/"commitStrategy" must be one of/);
   });
 
+  it('reads per-package plugin overrides', async () => {
+    const path = await temporaryConfigFile(
+      'release.config.json',
+      JSON.stringify({ packagePlugins: { '@demo/app': ['@semantic-release/npm', ['@semantic-release/git', { assets: ['package.json'] }]] } }),
+    );
+    expect((await readReleaseConfigFile(path)).packagePlugins).toEqual({ '@demo/app': ['@semantic-release/npm', ['@semantic-release/git', { assets: ['package.json'] }]] });
+  });
+
+  it('leaves packagePlugins undefined when the config file omits it, so every package uses the workspace-wide list', async () => {
+    const path = await temporaryConfigFile('release.config.json', JSON.stringify({ dryRun: true }));
+    expect((await readReleaseConfigFile(path)).packagePlugins).toBeUndefined();
+  });
+
+  it('rejects packagePlugins that is not an object of plugin arrays', async () => {
+    const notAnObject = await temporaryConfigFile('release.config.json', JSON.stringify({ packagePlugins: ['@semantic-release/npm'] }));
+    await expect(readReleaseConfigFile(notAnObject)).rejects.toThrow(/"packagePlugins" must be an object/);
+
+    const notAnArray = await temporaryConfigFile('release.config.json', JSON.stringify({ packagePlugins: { '@demo/app': '@semantic-release/npm' } }));
+    await expect(readReleaseConfigFile(notAnArray)).rejects.toThrow(/"packagePlugins" entry for "@demo\/app" must be an array/);
+
+    const badEntry = await temporaryConfigFile('release.config.json', JSON.stringify({ packagePlugins: { '@demo/app': [true] } }));
+    await expect(readReleaseConfigFile(badEntry)).rejects.toThrow(/each "packagePlugins" entry must be a module name or a \[name, config\] array/);
+  });
+
   it('rejects a missing config file', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'semantic-release-workspace-cli-'));
     temporaryDirectories.push(directory);
