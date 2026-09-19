@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { ReleaseConfigurationError } from './errors';
+import { ReleaseConfigurationError, UnsupportedDependencyRangeError } from './errors';
 import { git } from './git';
 import { type FixturePackage, createWorkspaceFixture } from './git-workspace-fixture';
 import { isJsonObject } from './json';
@@ -187,6 +187,29 @@ describe('releaseWorkspace with commitStrategy "single"', () => {
       // Nothing published: the run fails before analysis even starts -- one "scaffold workspace" commit plus one per chainPackages entry (see createWorkspaceFixture).
       const log = await git(['log', '--oneline', 'main'], { cwd: fixture.root });
       expect(log.split('\n').filter(Boolean)).toHaveLength(chainPackages.length + 1);
+    } finally {
+      await fixture.remove();
+    }
+  }, TestTimeoutMs.Medium);
+
+  it('refuses to release a publishable package declaring a workspace: range, before anything is written, committed, or tagged', async () => {
+    const fixture = await createWorkspaceFixture(
+      [
+        { name: '@fixture/a', version: '1.0.0', private: false },
+        { name: '@fixture/b', version: '1.0.0', private: false, dependencies: { '@fixture/a': 'workspace:^' } },
+      ],
+      [{ message: 'feat(a): second feature', files: { 'packages/a/src/index.js': 'export const a = 2;\n' } }],
+    );
+    try {
+      const headBefore = (await git(['rev-parse', 'HEAD'], { cwd: fixture.root })).trim();
+
+      const failure = releaseWorkspace({ root: fixture.root, env: releaseEnv(), plugins: SINGLE_FIXTURE_PLUGINS, commitStrategy: 'single' });
+      await expect(failure).rejects.toBeInstanceOf(UnsupportedDependencyRangeError);
+      await expect(failure).rejects.toThrow('@fixture/b: "@fixture/a" in dependencies is declared as "workspace:^"');
+
+      expect((await git(['rev-parse', 'HEAD'], { cwd: fixture.root })).trim()).toBe(headBefore);
+      expect((await git(['tag', '--list'], { cwd: fixture.root })).split('\n').filter(Boolean).sort()).toEqual(['@fixture/a@1.0.0', '@fixture/b@1.0.0']);
+      await expect(manifestVersion(fixture.root, '@fixture/a')).resolves.toBe('1.0.0');
     } finally {
       await fixture.remove();
     }

@@ -181,7 +181,7 @@ describe('releaseWorkspace against a real git workspace', () => {
     }
   }, TestTimeoutMs.Medium);
 
-  it('cascades through workspace: ranges pnpm resolves at publish time, releasing dependents without editing or committing their manifests', async () => {
+  it('cascades through bare workspace: ranges in private packages, releasing dependents without editing or committing their manifests', async () => {
     const fixture = await createWorkspaceFixture(
       [
         { name: '@fixture/a', version: '1.0.0' },
@@ -195,7 +195,7 @@ describe('releaseWorkspace against a real git workspace', () => {
 
       const byName = new Map(outcome.packages.map((pkg) => [pkg.name, pkg]));
       expect(byName.get('@fixture/a')).toMatchObject({ released: true, version: '1.1.0', type: 'minor' });
-      // The whole point of the resolved-at-publish kind: no manifest edit happens, so nothing in b's own directory changed, and the release is driven purely by the recorded bump -- the published range still changes because pnpm substitutes it at pack time.
+      // The whole point of the resolved-at-publish kind: the range names no version, so no manifest edit happens and nothing in b's own directory changed; the release is driven purely by the recorded bump.
       expect(byName.get('@fixture/b')).toMatchObject({
         released: true,
         version: '1.0.1',
@@ -342,6 +342,85 @@ describe('releaseWorkspace against a real git workspace', () => {
       const lockfile = await readFile(join(fixture.root, 'pnpm-lock.yaml'), 'utf8');
       const bImporter = lockfile.slice(lockfile.indexOf('packages/b:'));
       expect(bImporter).toMatch(/specifier:\s*\^1\.1\.0/);
+    } finally {
+      await fixture.remove();
+    }
+  }, TestTimeoutMs.Long);
+
+  it('keeps the workspace: prefix when it rewrites an anchored workspace: range in a private package, committing the rewritten range', async () => {
+    const fixture = await createWorkspaceFixture(
+      [
+        { name: '@fixture/a', version: '1.0.0' },
+        { name: '@fixture/b', version: '1.0.0', dependencies: { '@fixture/a': 'workspace:^1.0.0' } },
+      ],
+      [{ message: 'feat(a): second feature', files: { 'packages/a/src/index.js': 'export const a = 2;\n' } }],
+    );
+    try {
+      const outcome = await releaseWorkspace({ root: fixture.root, env: releaseEnv(), plugins: FIXTURE_PLUGINS });
+
+      const byName = new Map(outcome.packages.map((pkg) => [pkg.name, pkg]));
+      expect(byName.get('@fixture/b')).toMatchObject({
+        released: true,
+        dependencyBumps: [{ dependent: '@fixture/b', dependency: '@fixture/a', version: '1.1.0', range: 'workspace:^1.1.0', kind: 'rewritten' }],
+      });
+
+      // The prefix survives the rewrite, so a publishable package declaring this form would ship `workspace:^1.1.0` verbatim through npm publish -- which is why publishable packages are rejected for it (see the tests below).
+      await expect(manifestDependency(fixture.root, '@fixture/b', '@fixture/a')).resolves.toBe('workspace:^1.1.0');
+      const bumpLog = await git(['log', '--format=%s', '--grep=^chore(deps):', 'main'], { cwd: fixture.root });
+      expect(bumpLog).toContain('chore(deps): bump @fixture/a to workspace:^1.1.0 in @fixture/b [skip ci]');
+    } finally {
+      await fixture.remove();
+    }
+  }, TestTimeoutMs.Long);
+
+  it.each(['workspace:*', 'workspace:^', 'workspace:~', 'workspace:^1.0.0'])(
+    'refuses to release a publishable package declaring %s on a sibling, before anything is tagged, committed, or pushed',
+    async (specifier) => {
+      const fixture = await createWorkspaceFixture(
+        [
+          { name: '@fixture/a', version: '1.0.0', private: false },
+          { name: '@fixture/b', version: '1.0.0', private: false, dependencies: { '@fixture/a': specifier } },
+        ],
+        [{ message: 'feat(a): second feature', files: { 'packages/a/src/index.js': 'export const a = 2;\n' } }],
+      );
+      try {
+        const headBefore = (await git(['rev-parse', 'HEAD'], { cwd: fixture.root })).trim();
+
+        const failure = releaseWorkspace({ root: fixture.root, env: releaseEnv(), plugins: FIXTURE_PLUGINS });
+        await expect(failure).rejects.toBeInstanceOf(UnsupportedDependencyRangeError);
+        await expect(failure).rejects.toThrow(`@fixture/b: "@fixture/a" in dependencies is declared as "${specifier}"`);
+
+        // `a` would have released first had the check not run up front: nothing is tagged, committed, or pushed.
+        expect((await git(['rev-parse', 'HEAD'], { cwd: fixture.root })).trim()).toBe(headBefore);
+        const localTags = (await git(['tag', '--list'], { cwd: fixture.root })).split('\n').filter(Boolean).sort();
+        expect(localTags).toEqual(['@fixture/a@1.0.0', '@fixture/b@1.0.0']);
+        const remoteTags = (await git(['tag', '--list'], { cwd: fixture.remote })).split('\n').filter(Boolean).sort();
+        expect(remoteTags).toEqual(localTags);
+        await expect(manifestVersion(fixture.root, '@fixture/a')).resolves.toBe('1.0.0');
+      } finally {
+        await fixture.remove();
+      }
+    },
+    TestTimeoutMs.Medium,
+  );
+
+  it('still releases publishable packages that declare concrete ranges, and accepts workspace: only in their devDependencies', async () => {
+    const fixture = await createWorkspaceFixture(
+      [
+        { name: '@fixture/a', version: '1.0.0', private: false },
+        { name: '@fixture/b', version: '1.0.0', private: false, dependencies: { '@fixture/a': '^1.0.0' } },
+        { name: '@fixture/c', version: '1.0.0', private: false, devDependencies: { '@fixture/a': 'workspace:*' } },
+      ],
+      [{ message: 'feat(a): second feature', files: { 'packages/a/src/index.js': 'export const a = 2;\n' } }],
+    );
+    try {
+      const outcome = await releaseWorkspace({ root: fixture.root, env: releaseEnv(), plugins: FIXTURE_PLUGINS });
+
+      const byName = new Map(outcome.packages.map((pkg) => [pkg.name, pkg]));
+      expect(byName.get('@fixture/a')).toMatchObject({ released: true, version: '1.1.0' });
+      expect(byName.get('@fixture/b')).toMatchObject({ released: true, version: '1.0.1' });
+      expect(byName.get('@fixture/c')).toMatchObject({ released: true, version: '1.0.1' });
+      await expect(manifestDependency(fixture.root, '@fixture/b', '@fixture/a')).resolves.toBe('^1.1.0');
     } finally {
       await fixture.remove();
     }

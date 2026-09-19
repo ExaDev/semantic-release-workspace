@@ -38,4 +38,12 @@ describe('readManifest', () => {
     const path = await temporaryManifest({ name: 'has a space', version: '1.0.0' });
     await expect(readManifest(path)).rejects.toThrow(WorkspaceDiscoveryError);
   });
+
+  /** Mirrors `@semantic-release/npm`, which skips publishing only when `private` is the boolean `true` -- a truthy string does not make a package private, so it must not exempt one from the publishable-dependency check either. */
+  it('treats a package as private only when "private" is the boolean true', async () => {
+    await expect(readManifest(await temporaryManifest({ name: 'a', version: '1.0.0', private: true }))).resolves.toMatchObject({ private: true });
+    await expect(readManifest(await temporaryManifest({ name: 'a', version: '1.0.0', private: false }))).resolves.toMatchObject({ private: false });
+    await expect(readManifest(await temporaryManifest({ name: 'a', version: '1.0.0', private: 'true' }))).resolves.toMatchObject({ private: false });
+    await expect(readManifest(await temporaryManifest({ name: 'a', version: '1.0.0' }))).resolves.toMatchObject({ private: false });
+  });
 });

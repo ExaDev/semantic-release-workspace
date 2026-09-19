@@ -16,6 +16,8 @@ const INSTALLED_PACKAGES = '**/node_modules/**';
 export interface WorkspacePackage {
   readonly name: string;
   readonly version: string;
+  /** Whether the package is marked `private`, which means it is never published to npm. */
+  readonly private: boolean;
   /** Absolute path to the package directory. */
   readonly directory: string;
   /** Path relative to the workspace root, always POSIX-separated. Used for filesystem and git-pathspec purposes scoped to the workspace itself (for example `git add` run with the workspace root as `cwd`) -- never for matching against `git log` output, which `git` always reports relative to the repository's toplevel, not to whatever `cwd` a command happened to run from. Compare `repoRelativeDirectory` for that. */
@@ -76,6 +78,7 @@ export async function discoverWorkspace(root: string): Promise<Workspace> {
     packages.push({
       name: manifest.name,
       version: manifest.version,
+      private: manifest.private,
       directory,
       relativeDirectory,
       repoRelativeDirectory,

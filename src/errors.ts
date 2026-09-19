@@ -24,7 +24,7 @@ export class DependencyCycleError extends WorkspaceReleaseError {
   }
 }
 
-/** A dependency on a workspace sibling uses a range this tool cannot rewrite with confidence. Rewriting it wrongly, or leaving it silently stale, both produce a published manifest that disagrees with the repository, so the run stops instead. */
+/** A dependency range this tool cannot release correctly: either a range on a workspace sibling that it cannot rewrite with confidence (rewriting it wrongly, or leaving it silently stale, produces a published manifest that disagrees with the repository), or a `workspace:`, `catalog:`, `link:`, or `file:` specifier in a publishable package's published dependencies, which `npm publish` ships verbatim and no consumer can install. The run stops instead. */
 export class UnsupportedDependencyRangeError extends WorkspaceReleaseError {}
 
 /** The semantic-release options handed to the orchestrator cannot be scoped to a single package -- typically a publish plugin list that would leave a release commit or a cross-package manifest bump uncommitted. */

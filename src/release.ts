@@ -4,7 +4,7 @@ import type { BranchSpec, Options, Result } from 'semantic-release';
 import { formatDependencyBumpMessage } from './dependency-bump-commit';
 import { ReleaseConfigurationError, WorkspaceReleaseError } from './errors';
 import { commitFiles, pushHead, resolveCommitIdentity, sanitizeGitEnv, type CommitIdentity } from './git';
-import { buildDependencyGraph, mustGet, topologicalOrder, validateDependencyRangeShapes, type DependencyGraph } from './graph';
+import { buildDependencyGraph, mustGet, topologicalOrder, validateDependencyRanges, type DependencyGraph } from './graph';
 import { packageName } from './package-name';
 import {
   type DependencyBump,
@@ -107,7 +107,7 @@ export async function releaseWorkspace(options: ReleaseWorkspaceOptions = {}): P
 
   const workspace = await discoverWorkspace(root);
   const graph = buildDependencyGraph(workspace.packages);
-  validateDependencyRangeShapes(graph);
+  validateDependencyRanges(graph);
   const order = topologicalOrder(graph);
   log(`${packageName}: ${String(order.length)} packages in release order: ${order.join(' -> ')}`);
 

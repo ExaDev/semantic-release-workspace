@@ -10,7 +10,7 @@ import { changedPathsSince } from './git';
 import type { WorkspacePackage } from './workspace';
 
 /**
- * One workspace dependency range that changed because its package released a new version during this run. `rewritten` means the dependent's manifest was edited on disk; `resolved-at-publish` means a `workspace:^`-style range whose on-disk text is unchanged but whose published value pnpm re-resolves at pack time. Both change the dependent's published artifact, which is why both count towards its release.
+ * One workspace dependency range that changed because its package released a new version during this run. `rewritten` means the dependent's manifest was edited on disk; `resolved-at-publish` means a bare `workspace:^`-style range whose on-disk text is unchanged. Both count towards the dependent's release.
  */
 export interface DependencyBump {
   readonly dependency: string;

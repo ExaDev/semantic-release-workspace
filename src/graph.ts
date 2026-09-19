@@ -1,5 +1,6 @@
 import { DependencyCycleError, WorkspaceReleaseError } from './errors';
 import { type DependencyField } from './manifest';
+import { assertPublishableDependencies } from './publishable-dependencies';
 import { classifyDependencyRange } from './version-range';
 import { type WorkspacePackage } from './workspace';
 
@@ -117,11 +118,16 @@ function firstUnplacedDependency(name: string | undefined, graph: DependencyGrap
 }
 
 /**
- * Checks every workspace dependency edge's range shape before anything releases, so an `UnsupportedDependencyRangeError` stops a run before the first publish rather than after some sibling has already been published, tagged, committed, and pushed. The shape a range supports depends only on the range text itself (see `classifyDependencyRange`), never on which version a sibling ends up releasing, so this can run once up front for the whole graph instead of only being discovered edge by edge as each dependency happens to release.
+ * Validates every dependency range in the workspace before anything releases, so a run stops before the first publish rather than after some sibling has already been published, tagged, committed, and pushed. Two independent checks, both static properties of the manifests:
  *
- * Shared by both commit strategies (`release.ts`'s per-package loop and `single-commit-release.ts`'s analysis phase), which is why it lives alongside the graph it validates rather than inside either strategy's own module.
+ * - Every publishable package's installed dependencies must be specifiers a consumer can install (see `assertPublishableDependencies`), whichever package they name.
+ * - Every workspace dependency edge's range must have a shape this tool can maintain (see `classifyDependencyRange`, which depends only on the range text and never on which version a sibling ends up releasing).
+ *
+ * Both throw `UnsupportedDependencyRangeError`. Shared by every release path (`release.ts`'s per-package loop, `single-commit-release.ts`'s analysis phase, and `gate-publish.ts`'s detach), which is why it lives alongside the graph it validates rather than inside any one of them.
  */
-export function validateDependencyRangeShapes(graph: DependencyGraph): void {
+export function validateDependencyRanges(graph: DependencyGraph): void {
+  assertPublishableDependencies([...graph.packages.values()]);
+
   for (const edges of graph.dependencies.values()) {
     for (const edge of edges) {
       classifyDependencyRange(edge.range);

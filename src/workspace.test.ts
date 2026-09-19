@@ -34,7 +34,7 @@ async function writePackage(root: string, directory: string, manifest: Record<st
 describe('discoverWorkspace', () => {
   it('discovers every matched package with its dependency fields, workspace-agnostic of any specific ecosystem layout', async () => {
     const root = await temporaryWorkspace();
-    await writePackage(root, 'packages/alpha', { name: '@demo/alpha', version: '1.0.0' });
+    await writePackage(root, 'packages/alpha', { name: '@demo/alpha', version: '1.0.0', private: true });
     await writePackage(root, 'packages/beta', {
       name: '@demo/beta',
       version: '2.0.0',
@@ -47,6 +47,7 @@ describe('discoverWorkspace', () => {
     expect(workspace.packages.map((pkg) => pkg.name)).toEqual(['@demo/alpha', '@demo/beta']);
     const beta = workspace.packages[1];
     expect(beta?.relativeDirectory).toBe('packages/beta');
+    expect(workspace.packages.map((pkg) => pkg.private)).toEqual([true, false]);
     // The workspace root is the git toplevel here, so both directory fields agree.
     expect(beta?.repoRelativeDirectory).toBe('packages/beta');
     expect([...(beta?.dependencies.get('dependencies') ?? [])]).toEqual([['@demo/alpha', 'workspace:^']]);

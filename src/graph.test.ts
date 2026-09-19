@@ -7,6 +7,7 @@ function packageFixture(name: string, dependencies: Readonly<Record<string, stri
   return {
     name,
     version: '1.0.0',
+    private: false,
     directory: `/work/packages/${name}`,
     relativeDirectory: `packages/${name}`,
     repoRelativeDirectory: `packages/${name}`,

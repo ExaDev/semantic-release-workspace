@@ -26,6 +26,7 @@ function fakeWorkspacePackage(directory: string): WorkspacePackage {
   return {
     name: 'example',
     version: '0.0.0',
+    private: false,
     directory,
     relativeDirectory: '.',
     repoRelativeDirectory: '.',
