@@ -4,7 +4,7 @@ import type { BranchSpec, Options } from 'semantic-release';
 import { detachRelease, resumeRelease, type ReleaseGateState } from '@exadev/release-gate';
 import { WorkspaceReleaseError } from './errors';
 import { sanitizeGitEnv } from './git';
-import { buildDependencyGraph, mustGet, topologicalOrder, validateDependencyRanges } from './graph';
+import { buildDependencyGraph, mustGet, orderedPackages, topologicalOrder, validateDependencyRanges } from './graph';
 import { isJsonObject, isUnknownArray } from './json';
 import { readManifest } from './manifest';
 import { packageName } from './package-name';
@@ -46,7 +46,7 @@ export async function detachWorkspaceRelease(options: ReleaseWorkspaceOptions): 
   log(`${packageName}: ${String(order.length)} packages in release order (gated -- tag only, publish deferred): ${order.join(' -> ')}`);
 
   const publishPlugins = resolveWorkspacePublishPlugins(
-    order,
+    orderedPackages(graph, order),
     { plugins: options.plugins ?? DEFAULT_PUBLISH_PLUGINS, packagePlugins: options.packagePlugins },
     workspace.root,
     { requireGitPlugin: !dryRun },

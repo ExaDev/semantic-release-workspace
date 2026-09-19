@@ -158,6 +158,7 @@ The core technique is the same one multi-semantic-release proved in production: 
 - **Bump-only dependents always release.** multi-semantic-release rewrites dependency ranges in the working tree without committing them, so a dependent whose only change is a dependency update can go unreleased until some other commit triggers it. Here the bump is committed before the dependent's turn and a patch release is forced deterministically (see the timing section above).
 - **Loud failures by design.** A dependency cycle, an unsupported dependency range, a publish pipeline without @semantic-release/git (which would leave released manifests uncommitted), an unresolvable plugin, a duplicate package name — each stops the run with a specific error rather than degrading silently. There is deliberately no "skip this package and carry on" path: a partially-consistent set of publishes is worse than none.
 - **Only installable specifiers reach the registry.** `workspace:`, `catalog:`, `link:`, and `file:` specifiers in a publishable package's installed dependency fields are rejected instead of being published as written. In private packages and `devDependencies`, `workspace:*`/`workspace:^`/`workspace:~` are understood as naming no version (bump the release, not the manifest text), and `catalog:` and `npm:` aliases on a workspace sibling are rejected with an explanation instead of being mangled.
+- **Private packages release without advertising themselves.** A package marked `private` takes part in the run exactly as any other, tag and version bump and dependency cascade included, but creates no GitHub Release, because a Release for a package that never reaches a registry both points at nothing installable and takes the repository's Latest label off a package that does.
 - **Workspace-agnostic discovery.** Everything comes from `pnpm-workspace.yaml` and the manifests its globs match; pointing the orchestrator at any pnpm workspace is the entire configuration.
 
 Out of scope, on purpose: parallelising independent branches of the dependency graph (packages release sequentially in topological order for correctness first — a real future optimisation, not attempted here), and any Changesets-style explicit-changeset mode, which is a different paradigm rather than a missing feature.
@@ -225,11 +226,17 @@ Listing `@semantic-release/commit-analyzer` or `@semantic-release/release-notes-
 
 Note that the orchestrator sets `tagFormat`, `plugins`, `analyzeCommits`, and `generateNotes` explicitly on every per-package run, so those keys in any `release.config.*` found in the workspace are overridden by construction — configure the release through the orchestrator, not through a leftover single-package config.
 
+### Private packages and GitHub Releases
+
+A package whose manifest sets `"private": true` gets the workspace-wide plugin list minus `@semantic-release/github`, without being configured to. Nothing else about its release changes: it still gets its version bump, its `name@version` tag and the dependency cascade to its dependents, all of which a dependent's own release can hinge on (a private package whose build output ships inside a published one, for example). What it loses is a public GitHub Release for something nobody can install.
+
+That release is not merely redundant. `@semantic-release/github` sets the REST API's `make_latest` from the release branch alone, with no option to opt out, so every release it creates claims the repository's Latest label and the last one created keeps it. Topological order puts a package that depends on the published ones at the end of the run, which is exactly where a private package usually sits, so without this rule the repository's front page advertises an unpublishable package as its current release.
+
+To keep the Release for a private package anyway, name it in `packagePlugins` below: an explicit list is taken exactly as written.
+
 ### Per-package publish plugins
 
-`plugins` is one list for the whole workspace. `packagePlugins` (config file and programmatic API only, since a list keyed by package name has no natural flag form) replaces that list outright for the packages it names, and every other package keeps the workspace-wide list. The override is not merged with the workspace-wide list: it is the complete list for that package, subject to the same rules as any other (for instance `@semantic-release/git` is required under `commitStrategy: 'per-package'` and rejected under `'single'`). A name that is not a package in the workspace is rejected, so a misspelling cannot leave a package on the default list unnoticed.
-
-The case this exists for is a private package. Such a package still needs its `name@version` tag, its version bump and the dependency cascade to its dependents, because a dependent's own release can hinge on it (a private package whose build output ships inside a published one, for example). It does not need a public GitHub Release, and `@semantic-release/github` marks every release it creates from the release branch as the repository's Latest, so GitHub ends up showing whichever package the run released last, which is often a private one that depends on the rest. Leaving that plugin off the private package's list removes the Release and nothing else:
+`plugins` is one list for the whole workspace. `packagePlugins` (config file and programmatic API only, since a list keyed by package name has no natural flag form) replaces that list outright for the packages it names, and every other package keeps the workspace-wide list, or the private-package variant of it described above. The override is not merged with either: it is the complete list for that package, subject to the same rules as any other (for instance `@semantic-release/git` is required under `commitStrategy: 'per-package'` and rejected under `'single'`). A name that is not a package in the workspace is rejected, so a misspelling cannot leave a package on the default list unnoticed.
 
 ```ts
 // release-workspace.config.ts
@@ -237,7 +244,10 @@ import { DEFAULT_PUBLISH_PLUGINS, type ReleaseWorkspaceOptions } from '@exadev/s
 
 const config: ReleaseWorkspaceOptions = {
   packagePlugins: {
-    '@acme/web-console': DEFAULT_PUBLISH_PLUGINS.filter((plugin) => plugin !== '@semantic-release/github'),
+    // A private package that does want its GitHub Release, opting back in to the list every public package gets.
+    '@acme/internal-tooling': DEFAULT_PUBLISH_PLUGINS,
+    // A published package kept out of a step the rest need.
+    '@acme/docs-site': DEFAULT_PUBLISH_PLUGINS.filter((plugin) => plugin !== '@semantic-release/npm'),
   },
 };
 
