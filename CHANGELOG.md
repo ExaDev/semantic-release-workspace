@@ -1,3 +1,14 @@
+# [2.0.0](https://github.com/ExaDev/semantic-release-workspace/compare/v1.3.8...v2.0.0) (2026-09-19)
+
+
+* build(deps)!: move to cosmiconfig 10, which needs Node 22.18 or later ([a3f3206](https://github.com/ExaDev/semantic-release-workspace/commit/a3f3206bdfcd2daed5c5a2516843a45c5e12ffc4))
+
+
+### BREAKING CHANGES
+
+* requires Node 22.18 or later on the 22 line, or Node 24 and later,
+and TypeScript config files may no longer use non-erasable syntax such as enum or namespace.
+
 ## [1.3.8](https://github.com/ExaDev/semantic-release-workspace/compare/v1.3.7...v1.3.8) (2026-09-19)
 
 ## [1.3.7](https://github.com/ExaDev/semantic-release-workspace/compare/v1.3.6...v1.3.7) (2026-09-19)
