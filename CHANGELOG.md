@@ -1,3 +1,15 @@
+# [3.0.0](https://github.com/ExaDev/semantic-release-workspace/compare/v2.2.0...v3.0.0) (2026-09-19)
+
+
+* feat!: keep GitHub Releases off packages marked private in their manifest ([90ba74a](https://github.com/ExaDev/semantic-release-workspace/commit/90ba74a9c477b52c2bcda4dd4d17088b948b98dd))
+
+
+### BREAKING CHANGES
+
+* a private package that previously created a GitHub Release
+no longer does. Name it in packagePlugins with @semantic-release/github in
+its list to keep one.
+
 # [2.2.0](https://github.com/ExaDev/semantic-release-workspace/compare/v2.1.0...v2.2.0) (2026-09-19)
 
 
