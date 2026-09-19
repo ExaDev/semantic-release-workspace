@@ -12,6 +12,7 @@ import { regenerateLockfile } from './pnpm';
 import type { AppliedDependencyBump, PackageReleaseOutcome, ReleaseWorkspaceOptions, WorkspaceReleaseOutcome } from './release';
 import { updateDependencyRange } from './version-range';
 import { discoverWorkspace, type WorkspacePackage } from './workspace';
+import { DEFAULT_TAG_FORMAT, formatTagForPackage, validateTagFormat } from './tag-format';
 
 /**
  * `commitStrategy: 'single'`: one combined commit for the whole run instead of one commit per package release plus one per dependency bump.
@@ -50,6 +51,7 @@ export async function releaseWorkspaceSingleCommit(options: ReleaseWorkspaceOpti
   );
   const analyzeCommitsConfig = options.analyzeCommits ?? {};
   const generateNotesConfig = options.generateNotes ?? {};
+  const tagFormat = validateTagFormat(options.tagFormat ?? DEFAULT_TAG_FORMAT);
 
   const capturedCommits = new Map<string, readonly Commit[]>();
   const captured: { branch: BranchObject | undefined; repositoryUrl: string | undefined } = { branch: undefined, repositoryUrl: undefined };
@@ -64,6 +66,7 @@ export async function releaseWorkspaceSingleCommit(options: ReleaseWorkspaceOpti
     pendingBumps.delete(name);
 
     const nextRelease = await analysePackage(pkg, {
+    tagFormat,
       resolvedPlugins: mustGet(resolvedPlugins, name, 'publish plugins'),
       analyzeCommitsConfig,
       generateNotesConfig,
@@ -214,6 +217,7 @@ interface AnalysedNextRelease {
  * Runs one package's analysis with semantic-release's own real `dryRun: true` mode (which still fully computes `nextRelease.version`/`notes` and the branch/repository context; only the plugin steps whose own definition opts out of dry runs -- prepare, publish, addChannel, success, fail -- are skipped), using the exact same path-scoped `analyzeCommits`/`generateNotes` wrapper `commitStrategy: 'per-package'` uses. `dryRun: true` is forced here regardless of the caller's own `dryRun` option: this is always how phase 1 computes what *would* release, whether or not the run goes on to actually commit it.
  */
 async function analysePackage(pkg: WorkspacePackage, options: {
+  readonly tagFormat: string;
   readonly resolvedPlugins: readonly ResolvedPublishPlugin[];
   readonly analyzeCommitsConfig: Record<string, unknown>;
   readonly generateNotesConfig: Record<string, unknown>;
@@ -232,7 +236,7 @@ async function analysePackage(pkg: WorkspacePackage, options: {
   });
 
   const semanticReleaseOptions: Options = {
-    tagFormat: `${pkg.name}@` + '${version}',
+    tagFormat: formatTagForPackage(options.tagFormat, pkg.name),
     plugins: options.resolvedPlugins,
     dryRun: true,
     async analyzeCommits(pluginConfig: Record<string, unknown>, context: AnalyzeCommitsContext & { cwd: string }): Promise<string | false | undefined> {

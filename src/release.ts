@@ -21,6 +21,7 @@ import { updateDependencyRange } from './version-range';
 import { discoverWorkspace, type Workspace, type WorkspacePackage } from './workspace';
 import { releaseWorkspaceSingleCommit } from './single-commit-release';
 import { detachWorkspaceRelease, type DetachedPackageRelease } from './gate-publish';
+import { DEFAULT_TAG_FORMAT, formatTagForPackage, validateTagFormat } from './tag-format';
 
 /**
  * How a run commits its released changes:
@@ -55,6 +56,14 @@ export interface ReleaseWorkspaceOptions {
    * Opt-in, orthogonal to `commitStrategy` -- it governs *when* publish/success run relative to tag+push, not *how many commits* the release makes. When `true`, each package's release is tagged and pushed via `@exadev/release-gate`'s `detachRelease` but never published: `WorkspaceReleaseOutcome.detached` carries the state `resumeWorkspaceRelease` needs to finish publishing later, from the same process or a different one, once an external gate confirms the release should actually go out. Rejected outright in combination with `commitStrategy: 'single'` -- `single-commit-release.ts`'s tag/publish machinery is entirely bespoke and never goes through semantic-release's own `run()`, so it has no insertion point for `release-gate`'s primitives. Defaults to `false`, today's exact existing behaviour.
    */
   readonly gatePublish?: boolean;
+  /**
+   * Lodash template for each package's release tag, with `${name}` and `${version}` placeholders.
+   * Defaults to `'${name}@${version}'`. Override it when the tags double as refs consumed outside
+   * git: GitHub Actions pins composite actions as `owner/repo/path@ref`, and GitHub's workflow
+   * parser rejects a ref containing `@`, so a repository of actions sets `'${name}-v${version}'`
+   * and pins `...@<action>-v1`. Validated once per run by `validateTagFormat`.
+   */
+  readonly tagFormat?: string;
 }
 
 /** One dependency-range change applied to a dependent package's manifest during the run, attached to the dependent's own outcome. */
@@ -125,6 +134,7 @@ export async function releaseWorkspace(options: ReleaseWorkspaceOptions = {}): P
 
   const entries = await runReleaseLoop(graph, order, workspace, dryRun, log, async (pkg, bumpsForThisPackage) => {
     const result = await runPackageRelease(pkg, {
+      tagFormat: validateTagFormat(options.tagFormat ?? DEFAULT_TAG_FORMAT),
       publishPlugins: mustGet(publishPlugins, pkg.name, 'publish plugins'),
       analyzeCommitsConfig,
       generateNotesConfig,
@@ -219,6 +229,7 @@ async function runPackageRelease(pkg: WorkspacePackage, options: {
   readonly dryRun: boolean;
   readonly env: NodeJS.ProcessEnv | undefined;
   readonly branches: readonly BranchSpec[] | undefined;
+  readonly tagFormat: string;
 }): Promise<Result> {
   const scoped = createScopedPlugins({
     pkg,
@@ -229,7 +240,7 @@ async function runPackageRelease(pkg: WorkspacePackage, options: {
 
   const semanticReleaseOptions: Options = {
     // One tag namespace shared by every package: prefixing with the package name keeps each package's release tags (and the GitHub releases named after them) distinct and greppable.
-    tagFormat: `${pkg.name}@` + '${version}',
+    tagFormat: formatTagForPackage(options.tagFormat, pkg.name),
     plugins: options.publishPlugins,
     analyzeCommits: scoped.analyzeCommits,
     generateNotes: scoped.generateNotes,

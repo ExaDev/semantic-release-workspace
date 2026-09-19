@@ -1,3 +1,4 @@
+import { DEFAULT_TAG_FORMAT, formatTagForPackage, validateTagFormat } from './tag-format';
 import { resolve } from 'node:path';
 import type { BranchSpec, Options } from 'semantic-release';
 import { detachRelease, resumeRelease, type ReleaseGateState } from '@exadev/release-gate';
@@ -59,6 +60,7 @@ export async function detachWorkspaceRelease(options: ReleaseWorkspaceOptions): 
       analyzeCommitsConfig,
       generateNotesConfig,
       bumpsForThisPackage,
+      tagFormat: validateTagFormat(options.tagFormat ?? DEFAULT_TAG_FORMAT),
       dryRun,
       env,
       branches: options.branches,
@@ -97,6 +99,7 @@ async function runPackageDetach(
     readonly analyzeCommitsConfig: Record<string, unknown>;
     readonly generateNotesConfig: Record<string, unknown>;
     readonly bumpsForThisPackage: readonly AppliedDependencyBump[];
+  readonly tagFormat: string;
     readonly dryRun: boolean;
     readonly env: NodeJS.ProcessEnv | undefined;
     readonly branches: readonly BranchSpec[] | undefined;
@@ -110,7 +113,7 @@ async function runPackageDetach(
   });
 
   const cliOptions: Options = {
-    tagFormat: `${pkg.name}@` + '${version}',
+    tagFormat: formatTagForPackage(options.tagFormat, pkg.name),
     plugins: options.publishPlugins,
     analyzeCommits: scoped.analyzeCommits,
     generateNotes: scoped.generateNotes,
