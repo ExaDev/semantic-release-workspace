@@ -206,7 +206,7 @@ Run it from the workspace root (or pass `--root <directory>`). A dry run analyse
 | `--commit-strategy <mode>` | `per-package` (default) or `single` — see [Commit strategies](#commit-strategies) |
 | `--gate-publish` | Tag and push each due package, but defer publishing — see [Gating publish](#gating-publish). Requires `--gate-state-file`; rejected with `--commit-strategy single` |
 | `--gate-state-file <path>` | With `--gate-publish`: where to write the state a later `resume` run needs |
-| `--config <file>` | A config file (`.json`, `.yaml`, `.yml`, `.js`, `.cjs`, or `.ts`, loaded via [cosmiconfig](https://github.com/cosmiconfig/cosmiconfig)) providing any of the above; explicit flags win |
+| `--config <file>` | A config file (`.json`, `.yaml`, `.yml`, `.js`, `.cjs`, `.mjs`, `.ts`, `.cts`, or `.mts`, loaded via [cosmiconfig](https://github.com/cosmiconfig/cosmiconfig)) providing any of the above through its default export; explicit flags win. TypeScript files are run by Node's own type stripping, so they may use only erasable type syntax (annotations and `import type`, not `enum` or `namespace`) |
 
 `resume` (a separate subcommand, not a `release` flag) finishes publishing what a `--gate-publish` run tagged and pushed:
 
@@ -255,6 +255,7 @@ Every stage is also exported individually — `discoverWorkspace`, `buildDepende
 
 ### Repository requirements
 
+- Node 22.18 or later on the 22 line, or Node 24 and later: the range the config loader (cosmiconfig) supports, and the first 22 release that strips TypeScript types without a flag.
 - A git repository with a pushable `origin` (semantic-release verifies push access even in dry runs, and pushes tags and release commits in real ones). The workspace does not need to sit at the repository's toplevel -- discovery resolves its own prefix within the repository and scopes commit filtering against it -- but it does need to sit inside one.
 - A git identity (`user.name`/`user.email`) in CI for the `[skip ci]` bump commits, or the semantic-release-bot fallback identity is used automatically.
 - A branch checkout, not a detached HEAD: dependency-bump commits are pushed to the current branch by name, so a detached HEAD stops the run with a `WorkspaceStateError` rather than pushing `HEAD:HEAD` at the remote. CI checkouts that default to a detached HEAD need the branch checked out explicitly.
