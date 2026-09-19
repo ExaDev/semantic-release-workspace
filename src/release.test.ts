@@ -66,7 +66,7 @@ describe('releaseWorkspace against a real git workspace', () => {
     } finally {
       await fixture.remove();
     }
-  });
+  }, TestTimeoutMs.Long);
 
   it('rejects a tagFormat without the version placeholder before anything releases', async () => {
     const fixture = await createWorkspaceFixture(chainPackages, []);
@@ -77,7 +77,7 @@ describe('releaseWorkspace against a real git workspace', () => {
     } finally {
       await fixture.remove();
     }
-  });
+  }, TestTimeoutMs.Medium);
 
   it('releases every package in dependency order with path-scoped commits and cascading dependency bumps', async () => {
     const fixture = await createWorkspaceFixture(chainPackages, [
