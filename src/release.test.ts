@@ -43,6 +43,42 @@ const chainPackages: readonly FixturePackage[] = [
 ];
 
 describe('releaseWorkspace against a real git workspace', () => {
+  it('supports a custom tagFormat whose tags are usable as GitHub Actions refs', async () => {
+    const fixture = await createWorkspaceFixture(chainPackages, [
+      { message: 'feat(a): feature', files: { 'packages/a/src/index.js': 'export const a = 2;\n' } },
+    ], { tagFormat: '${name}-v${version}' });
+    try {
+      const outcome = await releaseWorkspace({
+        root: fixture.root,
+        env: releaseEnv(),
+        plugins: FIXTURE_PLUGINS,
+        tagFormat: '${name}-v${version}',
+      });
+
+      // The forced dependency patch releases cascaded with the custom template too.
+      expect(outcome.packages.every((pkg) => pkg.released)).toBe(true);
+
+      const localTags = (await git(['tag', '--list'], { cwd: fixture.root })).split('\n').filter(Boolean);
+      // The scoped fixture names contain '@', which the custom template exercises verbatim.
+      expect(localTags).toContain('@fixture/a-v1.1.0');
+      expect(localTags).toContain('@fixture/b-v1.0.1');
+      expect(localTags).not.toContain('@fixture/a@1.1.0');
+    } finally {
+      await fixture.remove();
+    }
+  });
+
+  it('rejects a tagFormat without the version placeholder before anything releases', async () => {
+    const fixture = await createWorkspaceFixture(chainPackages, []);
+    try {
+      await expect(
+        releaseWorkspace({ root: fixture.root, env: releaseEnv(), plugins: FIXTURE_PLUGINS, tagFormat: '${name}' }),
+      ).rejects.toThrow(/must contain '\$\{version\}'/);
+    } finally {
+      await fixture.remove();
+    }
+  });
+
   it('releases every package in dependency order with path-scoped commits and cascading dependency bumps', async () => {
     const fixture = await createWorkspaceFixture(chainPackages, [
       // A feat at the workspace root: if the path scoping were broken, this commit would push every package to a minor release, not just a.

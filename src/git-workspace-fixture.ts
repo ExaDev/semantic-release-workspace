@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { git } from './git';
 import { regenerateLockfile } from './pnpm';
+import { DEFAULT_TAG_FORMAT, formatTagForPackage } from './tag-format';
 
 /**
  * Builds a throwaway pnpm workspace with a real git repository, a real bare remote, real commits, and real `name@version` tags -- the substrate the orchestrator's tests drive end to end. The orchestrator's own discovery reads only `pnpm-workspace.yaml` and manifests and never invokes pnpm itself, but `bumpDependents`'s lockfile regeneration does, so a dependency-range bump against this fixture runs a real `pnpm install --lockfile-only`.
@@ -37,6 +38,8 @@ export interface WorkspaceFixture {
 export interface WorkspaceFixtureOptions {
   /** Path, relative to the git repository's toplevel, where `pnpm-workspace.yaml` and the packages live. Defaults to the repository toplevel itself. Set this to reproduce a workspace that is not itself the git toplevel -- e.g. a monorepo checked out with the pnpm workspace one level below the repository root. */
   readonly workspaceSubdirectory?: string;
+  /** Tag template applied to each scaffolded package's initial tag. Defaults to the tool's own `'\${name}@\${version}'`; tests exercising a custom tagFormat scaffold history in that same format, which is what a repository already using the custom format has. */
+  readonly tagFormat?: string;
   /**
    * Generates a real `pnpm-lock.yaml` from the fixture's own packages (via `pnpm install --lockfile-only`) and commits it as its own history entry before the fixture's own commits run, for tests that need a lockfile already present in history to observe it being kept in sync across a bump. Defaults to `false`: most tests don't assert anything about the lockfile, so they don't need one to already exist -- `regenerateLockfile` (see `pnpm.ts`) creates it from nothing the first time a dependency-range bump runs, same as it would in a repository adopting this tool for the first time.
    */
@@ -88,7 +91,7 @@ export async function createWorkspaceFixture(
       `packages/${directoryName}/package.json`,
       `packages/${directoryName}/src/index.js`,
     ]);
-    await git(['tag', tagFor(pkg.name, pkg.version)], { cwd: root });
+    await git(['tag', tagFor(pkg.name, pkg.version, options.tagFormat ?? DEFAULT_TAG_FORMAT)], { cwd: root });
   }
 
   if (options.pnpmLockfile === true) {
@@ -128,6 +131,6 @@ function unscopedName(name: string): string {
   return slash === -1 ? name : name.slice(slash + 1);
 }
 
-function tagFor(name: string, version: string): string {
-  return `${name}@${version}`;
+function tagFor(name: string, version: string, tagFormat: string): string {
+  return formatTagForPackage(tagFormat, name).replaceAll('${version}', version);
 }
