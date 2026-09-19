@@ -3,11 +3,11 @@ import type { BranchSpec, Options } from 'semantic-release';
 import { detachRelease, resumeRelease, type ReleaseGateState } from '@exadev/release-gate';
 import { WorkspaceReleaseError } from './errors';
 import { sanitizeGitEnv } from './git';
-import { buildDependencyGraph, topologicalOrder, validateDependencyRanges } from './graph';
+import { buildDependencyGraph, mustGet, topologicalOrder, validateDependencyRanges } from './graph';
 import { isJsonObject, isUnknownArray } from './json';
 import { readManifest } from './manifest';
 import { packageName } from './package-name';
-import { DEFAULT_PUBLISH_PLUGINS, resolvePublishPlugins, createScopedPlugins, type ResolvedPublishPlugin } from './plugins';
+import { DEFAULT_PUBLISH_PLUGINS, resolveWorkspacePublishPlugins, createScopedPlugins, type ResolvedPublishPlugin } from './plugins';
 import { assertPublishableDependencies } from './publishable-dependencies';
 import { discoverWorkspace, type WorkspacePackage } from './workspace';
 import {
@@ -44,13 +44,18 @@ export async function detachWorkspaceRelease(options: ReleaseWorkspaceOptions): 
   const order = topologicalOrder(graph);
   log(`${packageName}: ${String(order.length)} packages in release order (gated -- tag only, publish deferred): ${order.join(' -> ')}`);
 
-  const publishPlugins = resolvePublishPlugins(options.plugins ?? DEFAULT_PUBLISH_PLUGINS, workspace.root, { requireGitPlugin: !dryRun });
+  const publishPlugins = resolveWorkspacePublishPlugins(
+    order,
+    { plugins: options.plugins ?? DEFAULT_PUBLISH_PLUGINS, packagePlugins: options.packagePlugins },
+    workspace.root,
+    { requireGitPlugin: !dryRun },
+  );
   const analyzeCommitsConfig = options.analyzeCommits ?? {};
   const generateNotesConfig = options.generateNotes ?? {};
 
   const entries = await runReleaseLoop(graph, order, workspace, dryRun, log, async (pkg, bumpsForThisPackage) => {
     const state = await runPackageDetach(pkg, {
-      publishPlugins,
+      publishPlugins: mustGet(publishPlugins, pkg.name, 'publish plugins'),
       analyzeCommitsConfig,
       generateNotesConfig,
       bumpsForThisPackage,

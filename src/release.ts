@@ -9,7 +9,8 @@ import { packageName } from './package-name';
 import {
   type DependencyBump,
   DEFAULT_PUBLISH_PLUGINS,
-  resolvePublishPlugins,
+  resolveWorkspacePublishPlugins,
+  type PackagePluginSpecs,
   type PublishPluginSpec,
   type ResolvedPublishPlugin,
   createScopedPlugins,
@@ -40,6 +41,8 @@ export interface ReleaseWorkspaceOptions {
   readonly branches?: readonly BranchSpec[];
   /** Publish-pipeline plugins (changelog, npm, GitHub, git), each scoped per package by semantic-release's own `cwd`. Defaults to the standard pipeline in DEFAULT_PUBLISH_PLUGINS for `commitStrategy: 'per-package'`, or SINGLE_COMMIT_DEFAULT_PUBLISH_PLUGINS (the same list minus `@semantic-release/git`) for `commitStrategy: 'single'`. */
   readonly plugins?: readonly PublishPluginSpec[];
+  /** Publish plugin lists for individual packages, keyed by package name, each replacing `plugins` (or its default) outright for that package. Every other package keeps the workspace-wide list. The usual use is keeping one package out of a step the rest need, for example leaving `@semantic-release/github` off a private package so it gets its tag, version bump and dependency cascade without a public GitHub Release. Applies under every `commitStrategy` and to `gatePublish`. A name that is not a package in the workspace is rejected. */
+  readonly packagePlugins?: PackagePluginSpecs;
   /** Options for the wrapped `@semantic-release/commit-analyzer`, applied per package after path filtering. */
   readonly analyzeCommits?: Record<string, unknown>;
   /** Options for the wrapped `@semantic-release/release-notes-generator`, applied per package after path filtering. */
@@ -111,13 +114,18 @@ export async function releaseWorkspace(options: ReleaseWorkspaceOptions = {}): P
   const order = topologicalOrder(graph);
   log(`${packageName}: ${String(order.length)} packages in release order: ${order.join(' -> ')}`);
 
-  const publishPlugins = resolvePublishPlugins(options.plugins ?? DEFAULT_PUBLISH_PLUGINS, workspace.root, { requireGitPlugin: !dryRun });
+  const publishPlugins = resolveWorkspacePublishPlugins(
+    order,
+    { plugins: options.plugins ?? DEFAULT_PUBLISH_PLUGINS, packagePlugins: options.packagePlugins },
+    workspace.root,
+    { requireGitPlugin: !dryRun },
+  );
   const analyzeCommitsConfig = options.analyzeCommits ?? {};
   const generateNotesConfig = options.generateNotes ?? {};
 
   const entries = await runReleaseLoop(graph, order, workspace, dryRun, log, async (pkg, bumpsForThisPackage) => {
     const result = await runPackageRelease(pkg, {
-      publishPlugins,
+      publishPlugins: mustGet(publishPlugins, pkg.name, 'publish plugins'),
       analyzeCommitsConfig,
       generateNotesConfig,
       bumpsForThisPackage,

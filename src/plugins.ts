@@ -28,6 +28,9 @@ export interface DependencyBumpSource {
 /** A publish-pipeline plugin entry as the orchestrator accepts it: a module name, optionally with a config object. */
 export type PublishPluginSpec = string | readonly [string] | readonly [string, Record<string, unknown>];
 
+/** Publish plugin lists keyed by package name. Each list replaces the workspace-wide list outright for that one package; it is not merged with it. */
+export type PackagePluginSpecs = Readonly<Record<string, readonly PublishPluginSpec[]>>;
+
 /** semantic-release's own `getLastRelease` returns `{}` for a package with no prior tag -- not `undefined`, and not a fully-populated `LastRelease` -- contradicting the `gitHead: string` its own type declares. Narrows structurally rather than trusting that declared type, so a first-release context's `lastRelease` (correctly, at runtime) never claims a `gitHead` it does not have. */
 function hasGitHead(lastRelease: unknown): lastRelease is { readonly gitHead: string } {
   return typeof lastRelease === 'object' && lastRelease !== null && 'gitHead' in lastRelease && typeof lastRelease.gitHead === 'string';
@@ -202,6 +205,43 @@ export function resolvePublishPlugins(
   }
 
   return resolved;
+}
+
+/**
+ * Resolves the publish plugin list of every package in the workspace: the workspace-wide list for each package, except where `packagePlugins` names a package, whose own list replaces it. Every list is held to the same rules as `resolvePublishPlugins` applies to a workspace-wide one, and a failure in an override names the package it belongs to.
+ *
+ * A `packagePlugins` key that matches no package is rejected rather than ignored: a misspelt name would otherwise leave the package it meant on the workspace-wide list with nothing to say so, which for the intended use (keeping a package out of a step such as GitHub Release creation) is a silent wrong result.
+ */
+export function resolveWorkspacePublishPlugins(
+  packageNames: readonly string[],
+  specs: { readonly plugins: readonly PublishPluginSpec[]; readonly packagePlugins: PackagePluginSpecs | undefined },
+  workspaceRoot: string,
+  options: { readonly requireGitPlugin: boolean; readonly forbidGitPlugin?: boolean },
+): ReadonlyMap<string, readonly ResolvedPublishPlugin[]> {
+  const overrides = specs.packagePlugins === undefined ? [] : Object.entries(specs.packagePlugins);
+
+  const known = new Set(packageNames);
+  const unknown = overrides.map(([name]) => name).filter((name) => !known.has(name));
+  if (unknown.length > 0) {
+    throw new ReleaseConfigurationError(
+      `packagePlugins names ${unknown.map((name) => `"${name}"`).join(', ')}, which ${unknown.length === 1 ? 'is' : 'are'} not a package in this workspace. Packages: ${packageNames.join(', ')}.`,
+    );
+  }
+
+  const workspaceWide = resolvePublishPlugins(specs.plugins, workspaceRoot, options);
+  const resolvedOverrides = new Map<string, readonly ResolvedPublishPlugin[]>();
+  for (const [name, list] of overrides) {
+    try {
+      resolvedOverrides.set(name, resolvePublishPlugins(list, workspaceRoot, options));
+    } catch (cause) {
+      if (cause instanceof ReleaseConfigurationError) {
+        throw new ReleaseConfigurationError(`packagePlugins for "${name}": ${cause.message}`);
+      }
+      throw cause;
+    }
+  }
+
+  return new Map(packageNames.map((name) => [name, resolvedOverrides.get(name) ?? workspaceWide]));
 }
 
 /**

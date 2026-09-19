@@ -206,7 +206,7 @@ Run it from the workspace root (or pass `--root <directory>`). A dry run analyse
 | `--commit-strategy <mode>` | `per-package` (default) or `single` — see [Commit strategies](#commit-strategies) |
 | `--gate-publish` | Tag and push each due package, but defer publishing — see [Gating publish](#gating-publish). Requires `--gate-state-file`; rejected with `--commit-strategy single` |
 | `--gate-state-file <path>` | With `--gate-publish`: where to write the state a later `resume` run needs |
-| `--config <file>` | A config file (`.json`, `.yaml`, `.yml`, `.js`, `.cjs`, `.mjs`, `.ts`, `.cts`, or `.mts`, loaded via [cosmiconfig](https://github.com/cosmiconfig/cosmiconfig)) providing any of the above through its default export; explicit flags win. TypeScript files are run by Node's own type stripping, so they may use only erasable type syntax (annotations and `import type`, not `enum` or `namespace`) |
+| `--config <file>` | A config file (`.json`, `.yaml`, `.yml`, `.js`, `.cjs`, `.mjs`, `.ts`, `.cts`, or `.mts`, loaded via [cosmiconfig](https://github.com/cosmiconfig/cosmiconfig)) providing any of the above, plus `packagePlugins` (see [Per-package publish plugins](#per-package-publish-plugins)), through its default export; explicit flags win. TypeScript files are run by Node's own type stripping, so they may use only erasable type syntax (annotations and `import type`, not `enum` or `namespace`) |
 
 `resume` (a separate subcommand, not a `release` flag) finishes publishing what a `--gate-publish` run tagged and pushed:
 
@@ -218,6 +218,27 @@ Run it from the workspace root (or pass `--root <directory>`). A dry run analyse
 Listing `@semantic-release/commit-analyzer` or `@semantic-release/release-notes-generator` as a `--plugin` is rejected: the orchestrator always provides those two steps itself (wrapped), so configuring them there would be a silent no-op — pass their options via `--analyze-commits`/`--generate-notes` instead. A real (non-dry) run under `commitStrategy: 'per-package'` (the default) must include `@semantic-release/git` in the pipeline, because without it nothing commits released manifests and changelogs back to the branch; `commitStrategy: 'single'` is the opposite — it rejects `@semantic-release/git` outright, since it does that committing itself (see [Commit strategies](#commit-strategies)).
 
 Note that the orchestrator sets `tagFormat`, `plugins`, `analyzeCommits`, and `generateNotes` explicitly on every per-package run, so those keys in any `release.config.*` found in the workspace are overridden by construction — configure the release through the orchestrator, not through a leftover single-package config.
+
+### Per-package publish plugins
+
+`plugins` is one list for the whole workspace. `packagePlugins` (config file and programmatic API only, since a list keyed by package name has no natural flag form) replaces that list outright for the packages it names, and every other package keeps the workspace-wide list. The override is not merged with the workspace-wide list: it is the complete list for that package, subject to the same rules as any other (for instance `@semantic-release/git` is required under `commitStrategy: 'per-package'` and rejected under `'single'`). A name that is not a package in the workspace is rejected, so a misspelling cannot leave a package on the default list unnoticed.
+
+The case this exists for is a private package. Such a package still needs its `name@version` tag, its version bump and the dependency cascade to its dependents, because a dependent's own release can hinge on it (a private package whose build output ships inside a published one, for example). It does not need a public GitHub Release, and `@semantic-release/github` marks every release it creates from the release branch as the repository's Latest, so GitHub ends up showing whichever package the run released last, which is often a private one that depends on the rest. Leaving that plugin off the private package's list removes the Release and nothing else:
+
+```ts
+// release-workspace.config.ts
+import { DEFAULT_PUBLISH_PLUGINS, type ReleaseWorkspaceOptions } from '@exadev/semantic-release-workspace';
+
+const config: ReleaseWorkspaceOptions = {
+  packagePlugins: {
+    '@acme/web-console': DEFAULT_PUBLISH_PLUGINS.filter((plugin) => plugin !== '@semantic-release/github'),
+  },
+};
+
+export default config;
+```
+
+The override behaves the same under both commit strategies and with `gatePublish`. A gated run persists each package's pipeline in its state file, so the override reaches `resume` without being repeated there. Under `commitStrategy: 'single'` start from `SINGLE_COMMIT_DEFAULT_PUBLISH_PLUGINS` instead of `DEFAULT_PUBLISH_PLUGINS`.
 
 ### Programmatic API
 

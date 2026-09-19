@@ -7,7 +7,7 @@ import { assertCleanWorkingTree, commitFiles, createTag, git, pushHeadAndTags, r
 import { buildDependencyGraph, mustGet, topologicalOrder, validateDependencyRanges, type DependencyGraph } from './graph';
 import { writeDependencyRange } from './manifest';
 import { packageName } from './package-name';
-import { createScopedPlugins, resolvePublishPlugins, SINGLE_COMMIT_DEFAULT_PUBLISH_PLUGINS, type ResolvedPublishPlugin } from './plugins';
+import { createScopedPlugins, resolveWorkspacePublishPlugins, SINGLE_COMMIT_DEFAULT_PUBLISH_PLUGINS, type ResolvedPublishPlugin } from './plugins';
 import { regenerateLockfile } from './pnpm';
 import type { AppliedDependencyBump, PackageReleaseOutcome, ReleaseWorkspaceOptions, WorkspaceReleaseOutcome } from './release';
 import { updateDependencyRange } from './version-range';
@@ -42,10 +42,12 @@ export async function releaseWorkspaceSingleCommit(options: ReleaseWorkspaceOpti
   const order = topologicalOrder(graph);
   log(`${packageName}: ${String(order.length)} packages in release order: ${order.join(' -> ')} (commitStrategy: single)`);
 
-  const resolvedPlugins = resolvePublishPlugins(options.plugins ?? SINGLE_COMMIT_DEFAULT_PUBLISH_PLUGINS, workspace.root, {
-    requireGitPlugin: false,
-    forbidGitPlugin: true,
-  });
+  const resolvedPlugins = resolveWorkspacePublishPlugins(
+    order,
+    { plugins: options.plugins ?? SINGLE_COMMIT_DEFAULT_PUBLISH_PLUGINS, packagePlugins: options.packagePlugins },
+    workspace.root,
+    { requireGitPlugin: false, forbidGitPlugin: true },
+  );
   const analyzeCommitsConfig = options.analyzeCommits ?? {};
   const generateNotesConfig = options.generateNotes ?? {};
 
@@ -62,7 +64,7 @@ export async function releaseWorkspaceSingleCommit(options: ReleaseWorkspaceOpti
     pendingBumps.delete(name);
 
     const nextRelease = await analysePackage(pkg, {
-      resolvedPlugins,
+      resolvedPlugins: mustGet(resolvedPlugins, name, 'publish plugins'),
       analyzeCommitsConfig,
       generateNotesConfig,
       bumpsForThisPackage,
@@ -122,7 +124,7 @@ export async function releaseWorkspaceSingleCommit(options: ReleaseWorkspaceOpti
 
   // Phase 2: verify every released package's publish plugins before writing anything.
   for (const release of planned) {
-    for (const [modulePath, pluginConfig] of resolvedPlugins) {
+    for (const [modulePath, pluginConfig] of mustGet(resolvedPlugins, release.pkg.name, 'publish plugins')) {
       const plugin = await loadReleasePlugin(modulePath, moduleCache);
       if (plugin.verifyConditions) {
         await plugin.verifyConditions(pluginConfig, buildPluginContext(release, shared, capturedCommits, []));
@@ -140,7 +142,7 @@ export async function releaseWorkspaceSingleCommit(options: ReleaseWorkspaceOpti
       await writeDependencyRange(release.pkg.manifestPath, bump.field, bump.dependency, bump.range);
       anyRangeRewritten = true;
     }
-    for (const [modulePath, pluginConfig] of resolvedPlugins) {
+    for (const [modulePath, pluginConfig] of mustGet(resolvedPlugins, release.pkg.name, 'publish plugins')) {
       const plugin = await loadReleasePlugin(modulePath, moduleCache);
       if (plugin.prepare) {
         await plugin.prepare(pluginConfig, buildPluginContext(release, shared, capturedCommits, []));
@@ -171,7 +173,7 @@ export async function releaseWorkspaceSingleCommit(options: ReleaseWorkspaceOpti
   // Phase 5: publish, then success, per released package.
   for (const release of planned) {
     const releases: unknown[] = [];
-    for (const [modulePath, pluginConfig] of resolvedPlugins) {
+    for (const [modulePath, pluginConfig] of mustGet(resolvedPlugins, release.pkg.name, 'publish plugins')) {
       const plugin = await loadReleasePlugin(modulePath, moduleCache);
       if (plugin.publish) {
         const result = await plugin.publish(pluginConfig, buildPluginContext(release, shared, capturedCommits, releases));
@@ -180,7 +182,7 @@ export async function releaseWorkspaceSingleCommit(options: ReleaseWorkspaceOpti
         }
       }
     }
-    for (const [modulePath, pluginConfig] of resolvedPlugins) {
+    for (const [modulePath, pluginConfig] of mustGet(resolvedPlugins, release.pkg.name, 'publish plugins')) {
       const plugin = await loadReleasePlugin(modulePath, moduleCache);
       if (plugin.success) {
         await plugin.success(pluginConfig, buildPluginContext(release, shared, capturedCommits, releases));
