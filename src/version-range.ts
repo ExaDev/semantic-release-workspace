@@ -3,12 +3,12 @@ import { UnsupportedDependencyRangeError } from './errors';
 /**
  * What happens to one dependency range when the sibling it points at releases a new version.
  *
- * The distinction between `rewritten` and `resolved-at-publish` matters for the manifest, not for the release decision: both mean the dependent's *published* dependency range changes, and therefore that the dependent needs a release of its own for that change to reach consumers. Only `wildcard` leaves the published artifact genuinely identical.
+ * The distinction between `rewritten` and `resolved-at-publish` matters for the manifest, not for the release decision: both make the dependent release in its own right, so it always follows a sibling it depends on. Only `wildcard` leaves the dependent entirely unaffected.
  */
 export type DependencyRangeUpdate =
   /** The range names a concrete version that has to be rewritten in the manifest. */
   | { readonly kind: 'rewritten'; readonly range: string }
-  /** A bare `workspace:*`, `workspace:^`, or `workspace:~` range: pnpm substitutes the sibling's current version at pack time, so the manifest on disk needs no edit even though the published range does change. */
+  /** A bare `workspace:*`, `workspace:^`, or `workspace:~` range: it names no version, so the manifest on disk needs no edit. Only a private package or a `devDependencies` entry can carry one and still be released (see `assertPublishableDependencies`), because `npm publish` ships the specifier unchanged. */
   | { readonly kind: 'resolved-at-publish' }
   /** A range naming no version at all (`*`, `x`, `latest`). Nothing to rewrite, and the published range is unaffected by the sibling's new version. */
   | { readonly kind: 'wildcard' };
@@ -17,11 +17,22 @@ const WORKSPACE_PROTOCOL = 'workspace:';
 const CATALOG_PROTOCOL = 'catalog:';
 const NPM_ALIAS_PROTOCOL = 'npm:';
 
-/** The `workspace:` suffixes pnpm resolves against the sibling's version at pack time rather than against anything written in the manifest. */
+/** Specifier protocols that only a workspace-aware package manager resolves locally. `npm publish` copies them into the registry as written, so a published package declaring one in an installed dependency field cannot be installed. */
+const UNPUBLISHABLE_SPECIFIER_PROTOCOLS: readonly string[] = [WORKSPACE_PROTOCOL, CATALOG_PROTOCOL, 'link:', 'file:'];
+
+/** The `workspace:` suffixes that name no version, and so leave nothing in the manifest to rewrite. */
 const PUBLISH_RESOLVED_WORKSPACE_SUFFIXES: readonly string[] = ['*', '^', '~'];
 
 /** Ranges that pin nothing, so a sibling's new version cannot change what they mean. */
 const WILDCARD_RANGES: readonly string[] = ['', '*', 'x', 'X', 'latest'];
+
+/**
+ * The protocol of a specifier that `npm publish` would ship verbatim while no consumer's package manager can resolve it (`workspace:`, `catalog:`, `link:`, `file:`), or `undefined` for a specifier a consumer can install.
+ */
+export function unpublishableSpecifierProtocol(specifier: string): string | undefined {
+  const trimmed = specifier.trim();
+  return UNPUBLISHABLE_SPECIFIER_PROTOCOLS.find((protocol) => trimmed.startsWith(protocol));
+}
 
 /**
  * A single comparator whose version can be replaced in place without changing the comparator's intent. `<` and `<=` are deliberately absent: rewriting `<2.0.0` to `<1.4.0` narrows an upper bound to the very version being released, which is never what the author meant, so such a range is rejected rather than mangled.
@@ -57,7 +68,7 @@ export function classifyDependencyRange(current: string): DependencyRangeShape {
   }
 
   if (range.startsWith(CATALOG_PROTOCOL)) {
-    throw new UnsupportedDependencyRangeError(`Cannot bump the workspace dependency range "${current}": the version of a "catalog:" dependency lives in pnpm-workspace.yaml, not in the package manifest, so bumping it here would leave the catalog entry stale. Depend on the sibling directly (for example "workspace:^") instead.`);
+    throw new UnsupportedDependencyRangeError(`Cannot bump the workspace dependency range "${current}": the version of a "catalog:" dependency lives in pnpm-workspace.yaml, not in the package manifest, so bumping it here would leave the catalog entry stale. Declare the sibling's version range directly (for example "^1.0.0") instead.`);
   }
 
   if (range.startsWith(NPM_ALIAS_PROTOCOL)) {

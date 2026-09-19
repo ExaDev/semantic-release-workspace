@@ -1,11 +1,12 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { ReleaseConfigurationError } from './errors';
+import { ReleaseConfigurationError, UnsupportedDependencyRangeError } from './errors';
 import { resumeWorkspaceRelease, type DetachedPackageRelease } from './gate-publish';
 import { git } from './git';
 import { type FixturePackage, createWorkspaceFixture } from './git-workspace-fixture';
 import { isJsonObject, isUnknownArray } from './json';
+import { writeDependencyRange } from './manifest';
 import { type PublishPluginSpec } from './plugins';
 import { releaseWorkspace } from './release';
 import { TestTimeoutMs } from './test-timeouts';
@@ -180,6 +181,58 @@ describe('gatePublish against a real git workspace', () => {
 
       const finalCalls = await readRecordingPluginCalls(recordingPlugin);
       expect(finalCalls.publish).toHaveLength(1);
+    } finally {
+      await fixture.remove();
+    }
+  }, TestTimeoutMs.Long);
+
+  it('refuses to detach a publishable package declaring a workspace: range, before anything is tagged or pushed', async () => {
+    const fixture = await createWorkspaceFixture(
+      [
+        { name: '@fixture/a', version: '1.0.0', private: false },
+        { name: '@fixture/b', version: '1.0.0', private: false, dependencies: { '@fixture/a': 'workspace:^' } },
+      ],
+      [{ message: 'feat(a): second feature', files: { 'packages/a/src/index.js': 'export const a = 2;\n' } }],
+    );
+    try {
+      const headBefore = (await git(['rev-parse', 'HEAD'], { cwd: fixture.root })).trim();
+
+      const failure = releaseWorkspace({ root: fixture.root, env: releaseEnv(), gatePublish: true });
+      await expect(failure).rejects.toBeInstanceOf(UnsupportedDependencyRangeError);
+      await expect(failure).rejects.toThrow('@fixture/b: "@fixture/a" in dependencies is declared as "workspace:^"');
+
+      expect((await git(['rev-parse', 'HEAD'], { cwd: fixture.root })).trim()).toBe(headBefore);
+      expect((await git(['tag', '--list'], { cwd: fixture.root })).split('\n').filter(Boolean).sort()).toEqual(['@fixture/a@1.0.0', '@fixture/b@1.0.0']);
+    } finally {
+      await fixture.remove();
+    }
+  }, TestTimeoutMs.Medium);
+
+  it('refuses to resume a detached release whose package manifest now declares a workspace: range, publishing nothing', async () => {
+    const fixture = await createWorkspaceFixture(
+      [
+        { name: '@fixture/a', version: '1.0.0', private: false },
+        { name: '@fixture/b', version: '1.0.0', private: false, dependencies: { '@fixture/a': '^1.0.0' } },
+      ],
+      [{ message: 'feat(a): second feature', files: { 'packages/a/src/index.js': 'export const a = 2;\n' } }],
+    );
+    try {
+      const recordingPlugin = await writeRecordingPlugin(fixture.root);
+      const plugins: readonly PublishPluginSpec[] = [
+        ['@semantic-release/npm', { npmPublish: false }],
+        ['@semantic-release/git', { assets: ['package.json'], message: 'chore(release): ${nextRelease.gitTag} [skip ci]' }],
+        recordingPlugin.modulePath,
+      ];
+      const detachOutcome = await releaseWorkspace({ root: fixture.root, env: releaseEnv(), plugins, gatePublish: true });
+      const detached: readonly DetachedPackageRelease[] = detachOutcome.detached ?? [];
+
+      // A state file written by a release of this tool that predates the check, resumed against a manifest that still carries the unresolved range: resume is the last step before `npm publish`, so it checks too.
+      await writeDependencyRange(join(fixture.root, 'packages/b/package.json'), 'dependencies', '@fixture/a', 'workspace:^');
+
+      const failure = resumeWorkspaceRelease({ root: fixture.root, env: releaseEnv(), detached });
+      await expect(failure).rejects.toBeInstanceOf(UnsupportedDependencyRangeError);
+      await expect(failure).rejects.toThrow('@fixture/b: "@fixture/a" in dependencies is declared as "workspace:^"');
+      expect((await readRecordingPluginCalls(recordingPlugin)).publish).toEqual([]);
     } finally {
       await fixture.remove();
     }

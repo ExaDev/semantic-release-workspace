@@ -4,7 +4,7 @@ import semanticRelease from 'semantic-release';
 import type { AnalyzeCommitsContext, BranchObject, BranchSpec, Commit, Options, ReleaseType } from 'semantic-release';
 import { ReleaseConfigurationError } from './errors';
 import { assertCleanWorkingTree, commitFiles, createTag, git, pushHeadAndTags, resolveCommitIdentity, sanitizeGitEnv, workingTreeChanges } from './git';
-import { buildDependencyGraph, mustGet, topologicalOrder, validateDependencyRangeShapes, type DependencyGraph } from './graph';
+import { buildDependencyGraph, mustGet, topologicalOrder, validateDependencyRanges, type DependencyGraph } from './graph';
 import { writeDependencyRange } from './manifest';
 import { packageName } from './package-name';
 import { createScopedPlugins, resolvePublishPlugins, SINGLE_COMMIT_DEFAULT_PUBLISH_PLUGINS, type ResolvedPublishPlugin } from './plugins';
@@ -19,7 +19,7 @@ import { discoverWorkspace, type WorkspacePackage } from './workspace';
  * Five phases, all inside one `releaseWorkspaceSingleCommit` call:
  *
  * 1. **Analyse** (this file's `analysePackage`): for every package, in topological order, run semantic-release with `dryRun: true` forced (regardless of the caller's own `dryRun` option) using the same path-scoped `analyzeCommits`/`generateNotes` wrapper `commitStrategy: 'per-package'` uses -- computing each package's next version and notes without writing, committing, tagging, or publishing anything. Cross-package dependency bumps are tracked purely in memory during this phase (`pendingBumps`), exactly as the per-package strategy tracks them for the span of one run; nothing is committed yet for a later run to recover from, because this strategy never leaves a partial commit for a crash to recover from in the first place -- either the whole combined commit lands, or nothing does.
- * 2. **Verify** every released package's configured publish plugins' `verifyConditions` step (npm registry auth, GitHub token/repo access), before any file is written -- the same fail-fast-before-anything-releases discipline `validateDependencyRangeShapes` already applies to dependency ranges.
+ * 2. **Verify** every released package's configured publish plugins' `verifyConditions` step (npm registry auth, GitHub token/repo access), before any file is written -- the same fail-fast-before-anything-releases discipline `validateDependencyRanges` already applies to dependency ranges.
  * 3. **Prepare**: for every released package, in topological order, apply any dependency-range bump its own manifest received (writing `package.json` directly, the same `writeDependencyRange` the per-package strategy uses), then run every configured publish plugin's own `prepare` step generically (whichever it defines -- `@semantic-release/npm` bumps `package.json`'s version, `@semantic-release/changelog` writes `CHANGELOG.md`). `@semantic-release/git` is rejected outright from this mode's plugin list (see `resolvePublishPlugins`'s `forbidGitPlugin`), since its own `prepare` step would create exactly the per-package commit this mode exists to avoid. The lockfile is regenerated once at the end, not once per bump, since `pnpm install --lockfile-only` recomputes it from whatever is on disk regardless of how many manifests changed.
  * 4. **Commit**: discover every file phase 3 touched via `git status` (rather than predicting filenames per plugin), make one commit, tag it once per released package (`name@version`, lightweight, matching semantic-release's own tag form), and push the commit and every tag together.
  * 5. **Publish**: for every released package, in topological order, call each configured plugin's own `publish` step directly (not through semantic-release's top-level orchestrator -- see the note below), then `success`.
@@ -38,7 +38,7 @@ export async function releaseWorkspaceSingleCommit(options: ReleaseWorkspaceOpti
   await assertCleanWorkingTree({ cwd: repoRoot });
 
   const graph = buildDependencyGraph(workspace.packages);
-  validateDependencyRangeShapes(graph);
+  validateDependencyRanges(graph);
   const order = topologicalOrder(graph);
   log(`${packageName}: ${String(order.length)} packages in release order: ${order.join(' -> ')} (commitStrategy: single)`);
 

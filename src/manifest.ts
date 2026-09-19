@@ -6,15 +6,20 @@ import { isJsonObject, isStringRecord, stringifyJsonLike } from './json';
 /**
  * The manifest fields that can name a workspace sibling.
  *
- * All four contribute edges to the release order: whatever field a dependency sits in, the sibling has to have released before the dependent's manifest can name its new version. All four also contribute to the decision to release a dependent (see `releaseWorkspace`), because pnpm rewrites `workspace:` ranges in every one of them at pack time -- a `devDependencies` entry is part of the published artifact even though consumers never install it.
+ * All four contribute edges to the release order: whatever field a dependency sits in, the sibling has to have released before the dependent's manifest can name its new version. All four also contribute to the decision to release a dependent (see `releaseWorkspace`).
  */
 export type DependencyField = 'dependencies' | 'devDependencies' | 'peerDependencies' | 'optionalDependencies';
 
 export const DEPENDENCY_FIELDS: readonly DependencyField[] = ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies'];
 
+/** The fields whose entries a consumer's package manager resolves when it installs the published package. `devDependencies` is absent: it is published, but nothing ever installs it for a consumer. */
+export const INSTALLED_DEPENDENCY_FIELDS: readonly DependencyField[] = ['dependencies', 'peerDependencies', 'optionalDependencies'];
+
 export interface PackageManifest {
   readonly name: string;
   readonly version: string;
+  /** Whether the manifest sets `private` to the boolean `true`, the one value `@semantic-release/npm` treats as "never publish this package". */
+  readonly private: boolean;
   /** Only the fields actually present in the file, each mapping dependency name to its declared range. */
   readonly dependencies: ReadonlyMap<DependencyField, ReadonlyMap<string, string>>;
 }
@@ -51,7 +56,7 @@ export async function readManifest(path: string): Promise<PackageManifest> {
     dependencies.set(field, new Map(Object.entries(declared)));
   }
 
-  return { name, version, dependencies };
+  return { name, version, private: parsed.private === true, dependencies };
 }
 
 /**

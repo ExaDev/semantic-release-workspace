@@ -3,10 +3,12 @@ import type { BranchSpec, Options } from 'semantic-release';
 import { detachRelease, resumeRelease, type ReleaseGateState } from '@exadev/release-gate';
 import { WorkspaceReleaseError } from './errors';
 import { sanitizeGitEnv } from './git';
-import { buildDependencyGraph, topologicalOrder, validateDependencyRangeShapes } from './graph';
+import { buildDependencyGraph, topologicalOrder, validateDependencyRanges } from './graph';
 import { isJsonObject, isUnknownArray } from './json';
+import { readManifest } from './manifest';
 import { packageName } from './package-name';
 import { DEFAULT_PUBLISH_PLUGINS, resolvePublishPlugins, createScopedPlugins, type ResolvedPublishPlugin } from './plugins';
+import { assertPublishableDependencies } from './publishable-dependencies';
 import { discoverWorkspace, type WorkspacePackage } from './workspace';
 import {
   runReleaseLoop,
@@ -38,7 +40,7 @@ export async function detachWorkspaceRelease(options: ReleaseWorkspaceOptions): 
 
   const workspace = await discoverWorkspace(root);
   const graph = buildDependencyGraph(workspace.packages);
-  validateDependencyRangeShapes(graph);
+  validateDependencyRanges(graph);
   const order = topologicalOrder(graph);
   log(`${packageName}: ${String(order.length)} packages in release order (gated -- tag only, publish deferred): ${order.join(' -> ')}`);
 
@@ -163,6 +165,13 @@ export async function resumeWorkspaceRelease(options: ResumeWorkspaceReleaseOpti
   const root = resolve(options.root ?? process.cwd());
   const log = options.log ?? console.log;
   const env = sanitizeGitEnv(options.env ?? process.env);
+
+  // Checked against the manifests as they stand in this checkout, before the first package publishes: a state file written before the detach pass itself rejected these specifiers, or a manifest edited since, must not reach `npm publish`.
+  assertPublishableDependencies(
+    await Promise.all(
+      options.detached.filter((entry) => entry.state !== null).map(async (entry) => readManifest(resolve(root, entry.relativeDirectory, 'package.json'))),
+    ),
+  );
 
   const order: string[] = [];
   const packages: PackageReleaseOutcome[] = [];
