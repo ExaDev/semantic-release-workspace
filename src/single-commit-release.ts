@@ -4,7 +4,7 @@ import semanticRelease from 'semantic-release';
 import type { AnalyzeCommitsContext, BranchObject, BranchSpec, Commit, Options, ReleaseType } from 'semantic-release';
 import { ReleaseConfigurationError } from './errors';
 import { assertCleanWorkingTree, commitFiles, createTag, git, pushHeadAndTags, resolveCommitIdentity, sanitizeGitEnv, workingTreeChanges } from './git';
-import { buildDependencyGraph, mustGet, topologicalOrder, validateDependencyRanges, type DependencyGraph } from './graph';
+import { buildDependencyGraph, mustGet, orderedPackages, topologicalOrder, validateDependencyRanges, type DependencyGraph } from './graph';
 import { writeDependencyRange } from './manifest';
 import { packageName } from './package-name';
 import { createScopedPlugins, resolveWorkspacePublishPlugins, SINGLE_COMMIT_DEFAULT_PUBLISH_PLUGINS, type ResolvedPublishPlugin } from './plugins';
@@ -44,7 +44,7 @@ export async function releaseWorkspaceSingleCommit(options: ReleaseWorkspaceOpti
   log(`${packageName}: ${String(order.length)} packages in release order: ${order.join(' -> ')} (commitStrategy: single)`);
 
   const resolvedPlugins = resolveWorkspacePublishPlugins(
-    order,
+    orderedPackages(graph, order),
     { plugins: options.plugins ?? SINGLE_COMMIT_DEFAULT_PUBLISH_PLUGINS, packagePlugins: options.packagePlugins },
     workspace.root,
     { requireGitPlugin: false, forbidGitPlugin: true },

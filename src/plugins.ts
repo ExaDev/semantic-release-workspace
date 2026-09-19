@@ -31,6 +31,15 @@ export type PublishPluginSpec = string | readonly [string] | readonly [string, R
 /** Publish plugin lists keyed by package name. Each list replaces the workspace-wide list outright for that one package; it is not merged with it. */
 export type PackagePluginSpecs = Readonly<Record<string, readonly PublishPluginSpec[]>>;
 
+/** All resolving a package's publish plugins needs to know about it: its name, and whether its manifest marks it private. `WorkspacePackage` satisfies this structurally. */
+export interface PublishPluginPackage {
+  readonly name: string;
+  readonly private: boolean;
+}
+
+/** The one plugin a private package is kept off by default: see `resolveWorkspacePublishPlugins` for why a package that never reaches a registry does not get a public GitHub Release either. */
+const GITHUB_RELEASE_PLUGIN = '@semantic-release/github';
+
 /** semantic-release's own `getLastRelease` returns `{}` for a package with no prior tag -- not `undefined`, and not a fully-populated `LastRelease` -- contradicting the `gitHead: string` its own type declares. Narrows structurally rather than trusting that declared type, so a first-release context's `lastRelease` (correctly, at runtime) never claims a `gitHead` it does not have. */
 function hasGitHead(lastRelease: unknown): lastRelease is { readonly gitHead: string } {
   return typeof lastRelease === 'object' && lastRelease !== null && 'gitHead' in lastRelease && typeof lastRelease.gitHead === 'string';
@@ -210,21 +219,25 @@ export function resolvePublishPlugins(
 /**
  * Resolves the publish plugin list of every package in the workspace: the workspace-wide list for each package, except where `packagePlugins` names a package, whose own list replaces it. Every list is held to the same rules as `resolvePublishPlugins` applies to a workspace-wide one, and a failure in an override names the package it belongs to.
  *
+ * A package whose manifest sets `private: true` and which no `packagePlugins` entry names gets the workspace-wide list minus `@semantic-release/github`. A private package is never published, so a public GitHub Release for it advertises something nobody can install, and that release is not merely redundant: `@semantic-release/github` sets `make_latest` from the release branch alone, with no option to opt out, so every release it creates claims the repository's Latest label and the last one created keeps it. A private package sitting at the end of the topological order (which is where a package that depends on the published ones necessarily sits) therefore takes the label on every run. Everything the private package actually needs from the run is untouched: its version bump, its tag, and the dependency cascade to its dependents all come from the other plugins and from the orchestrator itself.
+ *
+ * A `packagePlugins` entry naming a private package is taken exactly as written, `@semantic-release/github` included, so a workspace that does want a Release for a private package can still say so.
+ *
  * A `packagePlugins` key that matches no package is rejected rather than ignored: a misspelt name would otherwise leave the package it meant on the workspace-wide list with nothing to say so, which for the intended use (keeping a package out of a step such as GitHub Release creation) is a silent wrong result.
  */
 export function resolveWorkspacePublishPlugins(
-  packageNames: readonly string[],
+  packages: readonly PublishPluginPackage[],
   specs: { readonly plugins: readonly PublishPluginSpec[]; readonly packagePlugins: PackagePluginSpecs | undefined },
   workspaceRoot: string,
   options: { readonly requireGitPlugin: boolean; readonly forbidGitPlugin?: boolean },
 ): ReadonlyMap<string, readonly ResolvedPublishPlugin[]> {
   const overrides = specs.packagePlugins === undefined ? [] : Object.entries(specs.packagePlugins);
 
-  const known = new Set(packageNames);
+  const known = new Set(packages.map((pkg) => pkg.name));
   const unknown = overrides.map(([name]) => name).filter((name) => !known.has(name));
   if (unknown.length > 0) {
     throw new ReleaseConfigurationError(
-      `packagePlugins names ${unknown.map((name) => `"${name}"`).join(', ')}, which ${unknown.length === 1 ? 'is' : 'are'} not a package in this workspace. Packages: ${packageNames.join(', ')}.`,
+      `packagePlugins names ${unknown.map((name) => `"${name}"`).join(', ')}, which ${unknown.length === 1 ? 'is' : 'are'} not a package in this workspace. Packages: ${[...known].join(', ')}.`,
     );
   }
 
@@ -241,7 +254,11 @@ export function resolveWorkspacePublishPlugins(
     }
   }
 
-  return new Map(packageNames.map((name) => [name, resolvedOverrides.get(name) ?? workspaceWide]));
+  const privateSpecs = specs.plugins.filter((spec) => parsePublishPluginSpec(spec)[0] !== GITHUB_RELEASE_PLUGIN);
+  // Resolved once for the whole workspace rather than per private package, and skipped altogether when the workspace-wide list creates no GitHub Release to begin with, in which case a private package's list is the workspace-wide one.
+  const forPrivatePackages = privateSpecs.length === specs.plugins.length ? workspaceWide : resolvePublishPlugins(privateSpecs, workspaceRoot, options);
+
+  return new Map(packages.map((pkg) => [pkg.name, resolvedOverrides.get(pkg.name) ?? (pkg.private ? forPrivatePackages : workspaceWide)]));
 }
 
 /**

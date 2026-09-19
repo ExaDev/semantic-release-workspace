@@ -153,20 +153,44 @@ describe('resolveWorkspacePublishPlugins', () => {
   const root = join(tmpdir(), 'nowhere-in-particular');
   const workspaceWide = ['@semantic-release/npm', '@semantic-release/github', '@semantic-release/git'] as const;
 
+  /** The two fields resolving a package's plugins reads, written out so each test states plainly whether the package it describes is private. */
+  function pkg(name: string, isPrivate = false): { readonly name: string; readonly private: boolean } {
+    return { name, private: isPrivate };
+  }
+
   function moduleNames(plugins: readonly (readonly [string, unknown])[] | undefined): readonly string[] {
     return (plugins ?? []).map(([modulePath]) => /@semantic-release[/\\]([a-z-]+)[/\\]/.exec(modulePath)?.[1] ?? modulePath);
   }
 
-  it('gives every package the workspace-wide list when there are no overrides', () => {
-    const resolved = resolveWorkspacePublishPlugins(['a', 'b'], { plugins: workspaceWide, packagePlugins: undefined }, root, { requireGitPlugin: true });
+  it('gives every public package the workspace-wide list when there are no overrides', () => {
+    const resolved = resolveWorkspacePublishPlugins([pkg('a'), pkg('b')], { plugins: workspaceWide, packagePlugins: undefined }, root, { requireGitPlugin: true });
     expect([...resolved.keys()]).toEqual(['a', 'b']);
     expect(moduleNames(resolved.get('a'))).toEqual(['npm', 'github', 'git']);
     expect(moduleNames(resolved.get('b'))).toEqual(['npm', 'github', 'git']);
   });
 
+  it('keeps @semantic-release/github off a private package, leaving the rest of the list and every public package alone', () => {
+    const resolved = resolveWorkspacePublishPlugins([pkg('a'), pkg('b', true)], { plugins: workspaceWide, packagePlugins: undefined }, root, { requireGitPlugin: true });
+    expect(moduleNames(resolved.get('a'))).toEqual(['npm', 'github', 'git']);
+    expect(moduleNames(resolved.get('b'))).toEqual(['npm', 'git']);
+  });
+
+  it('leaves a private package on the workspace-wide list when that list creates no GitHub Release to begin with', () => {
+    const withoutGitHub = ['@semantic-release/npm', '@semantic-release/git'] as const;
+    const resolved = resolveWorkspacePublishPlugins([pkg('a', true)], { plugins: withoutGitHub, packagePlugins: undefined }, root, { requireGitPlugin: true });
+    expect(moduleNames(resolved.get('a'))).toEqual(['npm', 'git']);
+  });
+
+  it('takes a private package override exactly as written, so a workspace that wants the Release can still ask for it', () => {
+    const resolved = resolveWorkspacePublishPlugins([pkg('a', true)], { plugins: ['@semantic-release/npm', '@semantic-release/git'], packagePlugins: { a: workspaceWide } }, root, {
+      requireGitPlugin: true,
+    });
+    expect(moduleNames(resolved.get('a'))).toEqual(['npm', 'github', 'git']);
+  });
+
   it('replaces the workspace-wide list only for the package an override names', () => {
     const resolved = resolveWorkspacePublishPlugins(
-      ['a', 'b'],
+      [pkg('a'), pkg('b')],
       { plugins: workspaceWide, packagePlugins: { b: ['@semantic-release/npm', ['@semantic-release/git', { assets: ['package.json'] }]] } },
       root,
       { requireGitPlugin: true },
@@ -177,18 +201,18 @@ describe('resolveWorkspacePublishPlugins', () => {
   });
 
   it('rejects an override naming a package that is not in the workspace, so a typo cannot silently leave a package on the default list', () => {
-    const call = (): unknown => resolveWorkspacePublishPlugins(['a'], { plugins: workspaceWide, packagePlugins: { b: [] } }, root, { requireGitPlugin: false });
+    const call = (): unknown => resolveWorkspacePublishPlugins([pkg('a')], { plugins: workspaceWide, packagePlugins: { b: [] } }, root, { requireGitPlugin: false });
     expect(call).toThrow(ReleaseConfigurationError);
     expect(call).toThrow(/"b"/);
   });
 
   it('names the package when its override breaks a rule the workspace-wide list is also held to', () => {
     const missingGit = (): unknown =>
-      resolveWorkspacePublishPlugins(['a', 'b'], { plugins: workspaceWide, packagePlugins: { b: ['@semantic-release/npm'] } }, root, { requireGitPlugin: true });
+      resolveWorkspacePublishPlugins([pkg('a'), pkg('b')], { plugins: workspaceWide, packagePlugins: { b: ['@semantic-release/npm'] } }, root, { requireGitPlugin: true });
     expect(missingGit).toThrow(/packagePlugins for "b".*@semantic-release\/git/s);
 
     const forbiddenGit = (): unknown =>
-      resolveWorkspacePublishPlugins(['a', 'b'], { plugins: ['@semantic-release/npm'], packagePlugins: { b: ['@semantic-release/git'] } }, root, {
+      resolveWorkspacePublishPlugins([pkg('a'), pkg('b')], { plugins: ['@semantic-release/npm'], packagePlugins: { b: ['@semantic-release/git'] } }, root, {
         requireGitPlugin: false,
         forbidGitPlugin: true,
       });

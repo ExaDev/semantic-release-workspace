@@ -511,6 +511,42 @@ describe('releaseWorkspace against a real git workspace', () => {
     }
   }, TestTimeoutMs.Long);
 
+  it('keeps the GitHub Release plugin off a private package without being told to, and keeps every other plugin on it', async () => {
+    const fixture = await createWorkspaceFixture(
+      [
+        { name: '@fixture/a', version: '1.0.0', private: false },
+        { name: '@fixture/b', version: '1.0.0', private: true, dependencies: { '@fixture/a': '^1.0.0' } },
+      ],
+      [{ message: 'feat(a): second feature', files: { 'packages/a/src/index.js': 'export const a = 2;\n' } }],
+    );
+    const recording = await createRecordingPlugin();
+    try {
+      // The real @semantic-release/github, not a stand-in: it is the plugin the private-package rule names, and its verifyConditions needs a token and a GitHub repository, neither of which this fixture or `releaseEnv` provides. The private package releasing at all is therefore evidence the plugin never ran for it. The public package reaches it through an override that leaves it off, because a fixture run that did reach it would fail.
+      const outcome = await releaseWorkspace({
+        root: fixture.root,
+        env: releaseEnv(),
+        plugins: [...FIXTURE_PLUGINS, '@semantic-release/github', recording.modulePath],
+        packagePlugins: { '@fixture/a': [...FIXTURE_PLUGINS, recording.modulePath] },
+      });
+
+      const byName = new Map(outcome.packages.map((pkg) => [pkg.name, pkg]));
+      expect(byName.get('@fixture/a')).toMatchObject({ released: true, version: '1.1.0' });
+      expect(byName.get('@fixture/b')).toMatchObject({ released: true, version: '1.0.1' });
+
+      // Only @semantic-release/github was dropped from the private package's list: the recording plugin sat beside it on the same workspace-wide list and still ran.
+      const calls = await readRecordingPluginCalls(recording);
+      expect(calls.publish.map((call) => call.name)).toEqual(['@fixture/a@1.1.0', '@fixture/b@1.0.1']);
+
+      // And the release itself is intact: version bump, tag pushed to the remote, dependency range rewritten.
+      await expect(manifestVersion(fixture.root, '@fixture/b')).resolves.toBe('1.0.1');
+      await expect(manifestDependency(fixture.root, '@fixture/b', '@fixture/a')).resolves.toBe('^1.1.0');
+      expect((await git(['tag', '--list'], { cwd: fixture.remote })).split('\n')).toContain('@fixture/b@1.0.1');
+    } finally {
+      await recording.remove();
+      await fixture.remove();
+    }
+  }, TestTimeoutMs.Long);
+
   it('rejects a per-package plugin override naming a package that is not in the workspace, before anything releases', async () => {
     const fixture = await createWorkspaceFixture(chainPackages, [
       { message: 'feat(a): second feature', files: { 'packages/a/src/index.js': 'export const a = 2;\n' } },

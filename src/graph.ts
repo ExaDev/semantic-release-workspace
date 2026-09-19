@@ -91,6 +91,11 @@ export function topologicalOrder(graph: DependencyGraph): readonly string[] {
   return ordered;
 }
 
+/** The packages a release order names, in that order, for the stages that need each package's manifest rather than only its name. */
+export function orderedPackages(graph: DependencyGraph, order: readonly string[]): readonly WorkspacePackage[] {
+  return order.map((name) => mustGet(graph.packages, name, 'package'));
+}
+
 /**
  * Walks dependency edges between the packages Kahn's algorithm could not place, until it revisits one, so the error can name a concrete loop rather than just a set of packages. Every unplaced package is unplaced precisely because at least one of its own dependencies is too, so the walk always reaches a repeat.
  */

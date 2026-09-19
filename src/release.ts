@@ -4,7 +4,7 @@ import type { BranchSpec, Options, Result } from 'semantic-release';
 import { formatDependencyBumpMessage } from './dependency-bump-commit';
 import { ReleaseConfigurationError, WorkspaceReleaseError } from './errors';
 import { commitFiles, pushHead, resolveCommitIdentity, sanitizeGitEnv, type CommitIdentity } from './git';
-import { buildDependencyGraph, mustGet, topologicalOrder, validateDependencyRanges, type DependencyGraph } from './graph';
+import { buildDependencyGraph, mustGet, orderedPackages, topologicalOrder, validateDependencyRanges, type DependencyGraph } from './graph';
 import { packageName } from './package-name';
 import {
   type DependencyBump,
@@ -42,7 +42,7 @@ export interface ReleaseWorkspaceOptions {
   readonly branches?: readonly BranchSpec[];
   /** Publish-pipeline plugins (changelog, npm, GitHub, git), each scoped per package by semantic-release's own `cwd`. Defaults to the standard pipeline in DEFAULT_PUBLISH_PLUGINS for `commitStrategy: 'per-package'`, or SINGLE_COMMIT_DEFAULT_PUBLISH_PLUGINS (the same list minus `@semantic-release/git`) for `commitStrategy: 'single'`. */
   readonly plugins?: readonly PublishPluginSpec[];
-  /** Publish plugin lists for individual packages, keyed by package name, each replacing `plugins` (or its default) outright for that package. Every other package keeps the workspace-wide list. The usual use is keeping one package out of a step the rest need, for example leaving `@semantic-release/github` off a private package so it gets its tag, version bump and dependency cascade without a public GitHub Release. Applies under every `commitStrategy` and to `gatePublish`. A name that is not a package in the workspace is rejected. */
+  /** Publish plugin lists for individual packages, keyed by package name, each replacing `plugins` (or its default) outright for that package. Every other package keeps the workspace-wide list, except that a package marked `private` in its manifest drops `@semantic-release/github` from it on its own (see `resolveWorkspacePublishPlugins`), so the usual reason to reach for this is either the reverse of that default, a private package that does want a GitHub Release, or keeping a package out of some other step the rest need. Applies under every `commitStrategy` and to `gatePublish`. A name that is not a package in the workspace is rejected. */
   readonly packagePlugins?: PackagePluginSpecs;
   /** Options for the wrapped `@semantic-release/commit-analyzer`, applied per package after path filtering. */
   readonly analyzeCommits?: Record<string, unknown>;
@@ -124,7 +124,7 @@ export async function releaseWorkspace(options: ReleaseWorkspaceOptions = {}): P
   log(`${packageName}: ${String(order.length)} packages in release order: ${order.join(' -> ')}`);
 
   const publishPlugins = resolveWorkspacePublishPlugins(
-    order,
+    orderedPackages(graph, order),
     { plugins: options.plugins ?? DEFAULT_PUBLISH_PLUGINS, packagePlugins: options.packagePlugins },
     workspace.root,
     { requireGitPlugin: !dryRun },
