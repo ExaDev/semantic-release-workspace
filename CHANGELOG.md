@@ -1,3 +1,10 @@
+# [2.1.0](https://github.com/ExaDev/semantic-release-workspace/compare/v2.0.0...v2.1.0) (2026-09-19)
+
+
+### Features
+
+* **release:** let the workspace config override the publish plugins for individual packages ([9e31816](https://github.com/ExaDev/semantic-release-workspace/commit/9e31816047f3320087f79ab38d02f8ff61d74bd5))
+
 # [2.0.0](https://github.com/ExaDev/semantic-release-workspace/compare/v1.3.8...v2.0.0) (2026-09-19)
 
 
