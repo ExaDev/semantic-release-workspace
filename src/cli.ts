@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { readFile, writeFile } from 'node:fs/promises';
-import { cosmiconfigSync } from 'cosmiconfig';
+import { cosmiconfig } from 'cosmiconfig';
 import { Command, InvalidArgumentError } from 'commander';
 // resolveJsonModule lets rolldown (via tsdown) inline this package's own declared version straight into the bundle at build time -- no runtime fs read.
 import { version } from '../package.json';
@@ -106,7 +106,7 @@ const NO_CONFIG_FILE: ReleaseConfigFile = {
 };
 
 async function runRelease(flags: ReleaseFlags): Promise<void> {
-  const file = flags.config === undefined ? NO_CONFIG_FILE : readReleaseConfigFile(flags.config);
+  const file = flags.config === undefined ? NO_CONFIG_FILE : await readReleaseConfigFile(flags.config);
   const gatePublish = flags.gatePublish ?? file.gatePublish ?? false;
   if (gatePublish && flags.gateStateFile === undefined) {
     throw new InvalidArgumentError('--gate-publish requires --gate-state-file, since that is where the state a later "resume" run needs gets written');
@@ -210,12 +210,13 @@ export interface ReleaseConfigFile {
   readonly gatePublish: boolean | undefined;
 }
 
-// A single loader instance would carry cosmiconfig's own load cache across every --config read, which never helps here (the CLI reads a given path at most once per process) and would be a stale-cache hazard for the one thing that does invoke this function repeatedly: this file's own test suite loading many different fixture paths in one process.
-function readConfigFile(path: string): unknown {
-  const explorer = cosmiconfigSync('semantic-release-workspace');
-  let result: ReturnType<typeof explorer.load>;
+// The asynchronous explorer, not `cosmiconfigSync`: the synchronous one loads `.js` and `.ts` files through `require()`, which for a module using `export default` returns the whole module namespace (`default`, `__esModule`, and every named export) rather than the default export, so a config file exporting anything besides its default would be rejected as having unknown options. The asynchronous one imports the file and hands back its default export.
+// A single explorer instance would carry cosmiconfig's own load cache across every --config read, which never helps here (the CLI reads a given path at most once per process) and would be a stale-cache hazard for the one thing that does invoke this function repeatedly: this file's own test suite loading many different fixture paths in one process.
+async function readConfigFile(path: string): Promise<unknown> {
+  const explorer = cosmiconfig('semantic-release-workspace');
+  let result: Awaited<ReturnType<typeof explorer.load>>;
   try {
-    result = explorer.load(path);
+    result = await explorer.load(path);
   } catch (cause) {
     throw new InvalidArgumentError(`--config file ${path} could not be loaded: ${cause instanceof Error ? cause.message : String(cause)}`);
   }
@@ -225,8 +226,8 @@ function readConfigFile(path: string): unknown {
   return result.config;
 }
 
-export function readReleaseConfigFile(path: string): ReleaseConfigFile {
-  const parsed: unknown = readConfigFile(path);
+export async function readReleaseConfigFile(path: string): Promise<ReleaseConfigFile> {
+  const parsed: unknown = await readConfigFile(path);
   if (!isJsonObject(parsed)) {
     throw new InvalidArgumentError(`--config file ${path} must contain a JSON object`);
   }

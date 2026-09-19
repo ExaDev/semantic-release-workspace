@@ -22,14 +22,14 @@ async function temporaryConfigFile(filename: string, contents: string): Promise<
 describe('readReleaseConfigFile', () => {
   it('reads a JSON config file', async () => {
     const path = await temporaryConfigFile('release.config.json', JSON.stringify({ dryRun: true, branches: ['main'] }));
-    const config = readReleaseConfigFile(path);
+    const config = await readReleaseConfigFile(path);
     expect(config.dryRun).toBe(true);
     expect(config.branches).toEqual(['main']);
   });
 
   it('reads a YAML config file', async () => {
     const path = await temporaryConfigFile('release.config.yaml', 'dryRun: true\nbranches:\n  - main\n');
-    const config = readReleaseConfigFile(path);
+    const config = await readReleaseConfigFile(path);
     expect(config.dryRun).toBe(true);
     expect(config.branches).toEqual(['main']);
   });
@@ -39,85 +39,112 @@ describe('readReleaseConfigFile', () => {
       'release.config.ts',
       "const config = { dryRun: true, branches: ['main', 'next'], analyzeCommits: { preset: 'conventionalcommits' } };\nexport default config;\n",
     );
-    const config = readReleaseConfigFile(path);
+    const config = await readReleaseConfigFile(path);
     expect(config.dryRun).toBe(true);
     expect(config.branches).toEqual(['main', 'next']);
     expect(config.analyzeCommits).toEqual({ preset: 'conventionalcommits' });
   });
 
+  it('reads the default export of a TypeScript config file that also has type annotations, a type-only import, and named exports', async () => {
+    const path = await temporaryConfigFile(
+      'release.config.ts',
+      [
+        "import type { ReleaseWorkspaceOptions } from '@exadev/semantic-release-workspace';",
+        "export const commitTypes: readonly string[] = ['feat', 'fix'];",
+        "const config: Pick<ReleaseWorkspaceOptions, 'dryRun' | 'branches'> = { dryRun: false, branches: ['main'] };",
+        'export default config;',
+        '',
+      ].join('\n'),
+    );
+    const config = await readReleaseConfigFile(path);
+    expect(config.dryRun).toBe(false);
+    expect(config.branches).toEqual(['main']);
+  });
+
+  it('reads the default export of an ES module config file', async () => {
+    const path = await temporaryConfigFile('release.config.mjs', "export default { branches: ['main'] };\n");
+    expect((await readReleaseConfigFile(path)).branches).toEqual(['main']);
+  });
+
+  it('rejects a TypeScript config file using syntax that cannot be type-stripped, as a load failure', async () => {
+    const path = await temporaryConfigFile('release.config.ts', "enum Level { Patch }\nexport default { branches: [Level[0]] };\n");
+    await expect(readReleaseConfigFile(path)).rejects.toThrow(InvalidArgumentError);
+    await expect(readReleaseConfigFile(path)).rejects.toThrow(/--config file .* could not be loaded/);
+  });
+
   it('reads a CommonJS config file', async () => {
     const path = await temporaryConfigFile('release.config.cjs', "module.exports = { branches: ['main'] };\n");
-    const config = readReleaseConfigFile(path);
+    const config = await readReleaseConfigFile(path);
     expect(config.branches).toEqual(['main']);
   });
 
   it('rejects a config file containing invalid JSON syntax', async () => {
     const path = await temporaryConfigFile('release.config.json', '{ "dryRun": true, }');
-    expect(() => readReleaseConfigFile(path)).toThrow(InvalidArgumentError);
-    expect(() => readReleaseConfigFile(path)).toThrow(/--config file .* could not be loaded/);
+    await expect(readReleaseConfigFile(path)).rejects.toThrow(InvalidArgumentError);
+    await expect(readReleaseConfigFile(path)).rejects.toThrow(/--config file .* could not be loaded/);
   });
 
   it('rejects a TypeScript config file that throws during execution', async () => {
     const path = await temporaryConfigFile('release.config.ts', "throw new Error('boom');\n");
-    expect(() => readReleaseConfigFile(path)).toThrow(InvalidArgumentError);
-    expect(() => readReleaseConfigFile(path)).toThrow(/--config file .* could not be loaded/);
+    await expect(readReleaseConfigFile(path)).rejects.toThrow(InvalidArgumentError);
+    await expect(readReleaseConfigFile(path)).rejects.toThrow(/--config file .* could not be loaded/);
   });
 
   it('rejects a TypeScript config file whose default export fails shape validation', async () => {
     const path = await temporaryConfigFile('release.config.ts', "export default { dryRun: 'not-a-boolean' };\n");
-    expect(() => readReleaseConfigFile(path)).toThrow(InvalidArgumentError);
-    expect(() => readReleaseConfigFile(path)).toThrow(/"dryRun" must be a boolean/);
+    await expect(readReleaseConfigFile(path)).rejects.toThrow(InvalidArgumentError);
+    await expect(readReleaseConfigFile(path)).rejects.toThrow(/"dryRun" must be a boolean/);
   });
 
   it('rejects an empty config file', async () => {
     const path = await temporaryConfigFile('release.config.json', '');
-    expect(() => readReleaseConfigFile(path)).toThrow(InvalidArgumentError);
-    expect(() => readReleaseConfigFile(path)).toThrow(/is empty/);
+    await expect(readReleaseConfigFile(path)).rejects.toThrow(InvalidArgumentError);
+    await expect(readReleaseConfigFile(path)).rejects.toThrow(/is empty/);
   });
 
   it('rejects a config file with an unknown option', async () => {
     const path = await temporaryConfigFile('release.config.json', JSON.stringify({ notARealOption: true }));
-    expect(() => readReleaseConfigFile(path)).toThrow(/unknown option/);
+    await expect(readReleaseConfigFile(path)).rejects.toThrow(/unknown option/);
   });
 
   it('reads a commitStrategy of "single"', async () => {
     const path = await temporaryConfigFile('release.config.json', JSON.stringify({ commitStrategy: 'single' }));
-    expect(readReleaseConfigFile(path).commitStrategy).toBe('single');
+    expect((await readReleaseConfigFile(path)).commitStrategy).toBe('single');
   });
 
   it('leaves commitStrategy undefined when the config file omits it, so releaseWorkspace applies its own "per-package" default', async () => {
     const path = await temporaryConfigFile('release.config.json', JSON.stringify({ dryRun: true }));
-    expect(readReleaseConfigFile(path).commitStrategy).toBeUndefined();
+    expect((await readReleaseConfigFile(path)).commitStrategy).toBeUndefined();
   });
 
   it('rejects a commitStrategy that is not "per-package" or "single"', async () => {
     const path = await temporaryConfigFile('release.config.json', JSON.stringify({ commitStrategy: 'per-commit' }));
-    expect(() => readReleaseConfigFile(path)).toThrow(InvalidArgumentError);
-    expect(() => readReleaseConfigFile(path)).toThrow(/"commitStrategy" must be one of/);
+    await expect(readReleaseConfigFile(path)).rejects.toThrow(InvalidArgumentError);
+    await expect(readReleaseConfigFile(path)).rejects.toThrow(/"commitStrategy" must be one of/);
   });
 
   it('rejects a missing config file', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'semantic-release-workspace-cli-'));
     temporaryDirectories.push(directory);
     const path = join(directory, 'does-not-exist.json');
-    expect(() => readReleaseConfigFile(path)).toThrow(InvalidArgumentError);
-    expect(() => readReleaseConfigFile(path)).toThrow(/--config file .* could not be loaded/);
+    await expect(readReleaseConfigFile(path)).rejects.toThrow(InvalidArgumentError);
+    await expect(readReleaseConfigFile(path)).rejects.toThrow(/--config file .* could not be loaded/);
   });
 
   it('reads a gatePublish of true', async () => {
     const path = await temporaryConfigFile('release.config.json', JSON.stringify({ gatePublish: true }));
-    expect(readReleaseConfigFile(path).gatePublish).toBe(true);
+    expect((await readReleaseConfigFile(path)).gatePublish).toBe(true);
   });
 
   it('leaves gatePublish undefined when the config file omits it, so releaseWorkspace applies its own "false" default', async () => {
     const path = await temporaryConfigFile('release.config.json', JSON.stringify({ dryRun: true }));
-    expect(readReleaseConfigFile(path).gatePublish).toBeUndefined();
+    expect((await readReleaseConfigFile(path)).gatePublish).toBeUndefined();
   });
 
   it('rejects a gatePublish that is not a boolean', async () => {
     const path = await temporaryConfigFile('release.config.json', JSON.stringify({ gatePublish: 'yes' }));
-    expect(() => readReleaseConfigFile(path)).toThrow(InvalidArgumentError);
-    expect(() => readReleaseConfigFile(path)).toThrow(/"gatePublish" must be a boolean/);
+    await expect(readReleaseConfigFile(path)).rejects.toThrow(InvalidArgumentError);
+    await expect(readReleaseConfigFile(path)).rejects.toThrow(/"gatePublish" must be a boolean/);
   });
 });
 
