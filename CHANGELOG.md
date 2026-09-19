@@ -1,3 +1,10 @@
+## [1.3.7](https://github.com/ExaDev/semantic-release-workspace/compare/v1.3.6...v1.3.7) (2026-09-19)
+
+
+### Bug Fixes
+
+* **release:** refuse to publish workspace, catalog, link and file dependency specifiers ([2273f65](https://github.com/ExaDev/semantic-release-workspace/commit/2273f655374796746d5072aea30b6c784ffeac9d))
+
 ## [1.3.6](https://github.com/ExaDev/semantic-release-workspace/compare/v1.3.5...v1.3.6) (2026-09-14)
 
 
