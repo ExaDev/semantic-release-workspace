@@ -1,3 +1,10 @@
+# [2.2.0](https://github.com/ExaDev/semantic-release-workspace/compare/v2.1.0...v2.2.0) (2026-09-19)
+
+
+### Features
+
+* configurable tagFormat so release tags can double as refs GitHub Actions can pin ([72670c6](https://github.com/ExaDev/semantic-release-workspace/commit/72670c63a2ff87b7a0291e0b7bd10cd60d71c9dd))
+
 # [2.1.0](https://github.com/ExaDev/semantic-release-workspace/compare/v2.0.0...v2.1.0) (2026-09-19)
 
 
