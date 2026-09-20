@@ -1,3 +1,10 @@
+## [3.0.2](https://github.com/ExaDev/semantic-release-workspace/compare/v3.0.1...v3.0.2) (2026-09-20)
+
+
+### Bug Fixes
+
+* keep releasing after the branch moves under a per-package run ([d87d661](https://github.com/ExaDev/semantic-release-workspace/commit/d87d6610fe41339cd3121301d11bf2fe78a42578))
+
 ## [3.0.1](https://github.com/ExaDev/semantic-release-workspace/compare/v3.0.0...v3.0.1) (2026-09-20)
 
 
