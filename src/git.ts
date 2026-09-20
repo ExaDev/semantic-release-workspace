@@ -189,6 +189,44 @@ export async function pushHeadAndTags(tagNames: readonly string[], options: GitC
   await git(['push', '--atomic', 'origin', `HEAD:${branch}`, ...tagNames], options);
 }
 
+/**
+ * Fetches `branch` from origin and returns the commit it now points at.
+ *
+ * This is how a failed push is classified, in preference to reading the reason git printed for the rejection. The wording is not stable enough to branch on: the same race produces `! [rejected] ... (non-fast-forward)` from one server and `cannot lock ref 'refs/heads/main': is at <x> but expected <y>` from another (both observed, the first against GitHub and the second against a local bare repository under `--atomic`), and neither is a documented interface. Whether the branch actually moved is a fact about the remote rather than a string, it is the precise condition a retry can recover from, and it is knowable by asking.
+ */
+export async function fetchBranchTip(branch: string, options: GitCommandOptions): Promise<string> {
+  await git(['fetch', 'origin', branch], options);
+  return (await git(['rev-parse', 'FETCH_HEAD'], options)).trim();
+}
+
+/** Whether `ancestor` is reachable from `descendant`. `git merge-base --is-ancestor` reports the answer as an exit status rather than on stdout: 0 for yes and 1 for no are both answers, so only any other exit code is a failure. */
+export async function isAncestor(ancestor: string, descendant: string, options: GitCommandOptions): Promise<boolean> {
+  const args = ['merge-base', '--is-ancestor', ancestor, descendant];
+  try {
+    await execGit(args, options.cwd);
+    return true;
+  } catch (cause) {
+    const error = toGitCommandError(args, options.cwd, cause);
+    if (error.exitCode === 1) {
+      return false;
+    }
+    throw error;
+  }
+}
+
+/** Discards every commit and working-tree change the current attempt made, putting the checkout back on exactly `ref`. */
+export async function resetHardTo(ref: string, options: GitCommandOptions): Promise<void> {
+  await git(['reset', '--hard', ref], options);
+}
+
+/** Deletes local tags. A retried attempt must drop the tags its predecessor created before it recreates them: `git tag` refuses a name that already exists, so without this the second attempt fails while tagging, before it ever reaches the push it was retrying. */
+export async function deleteLocalTags(tagNames: readonly string[], options: GitCommandOptions): Promise<void> {
+  if (tagNames.length === 0) {
+    return;
+  }
+  await git(['tag', '-d', ...tagNames], options);
+}
+
 function toGitCommandError(args: readonly string[], cwd: string, cause: unknown): GitCommandError {
   const exitCode = cause instanceof Error && 'code' in cause && typeof cause.code === 'number' ? cause.code : undefined;
   const stderr = cause instanceof Error && 'stderr' in cause && typeof cause.stderr === 'string' ? cause.stderr.trim() : '';

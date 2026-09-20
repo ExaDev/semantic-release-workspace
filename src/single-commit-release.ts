@@ -2,14 +2,28 @@ import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import semanticRelease from 'semantic-release';
 import type { AnalyzeCommitsContext, BranchObject, BranchSpec, Commit, Options, ReleaseType } from 'semantic-release';
-import { ReleaseConfigurationError } from './errors';
-import { assertCleanWorkingTree, commitFiles, createTag, git, pushHeadAndTags, resolveCommitIdentity, sanitizeGitEnv, workingTreeChanges } from './git';
+import { GitCommandError, ReleaseConfigurationError, WorkspaceStateError } from './errors';
+import {
+  assertCleanWorkingTree,
+  commitFiles,
+  createTag,
+  currentBranch,
+  deleteLocalTags,
+  fetchBranchTip,
+  git,
+  isAncestor,
+  pushHeadAndTags,
+  resetHardTo,
+  resolveCommitIdentity,
+  sanitizeGitEnv,
+  workingTreeChanges,
+} from './git';
 import { buildDependencyGraph, mustGet, orderedPackages, topologicalOrder, validateDependencyRanges, type DependencyGraph } from './graph';
 import { writeDependencyRange } from './manifest';
 import { packageName } from './package-name';
 import { createScopedPlugins, resolveWorkspacePublishPlugins, SINGLE_COMMIT_DEFAULT_PUBLISH_PLUGINS, type ResolvedPublishPlugin } from './plugins';
 import { regenerateLockfile } from './pnpm';
-import type { AppliedDependencyBump, PackageReleaseOutcome, ReleaseWorkspaceOptions, WorkspaceReleaseOutcome } from './release';
+import { DEFAULT_PUSH_ATTEMPTS, type AppliedDependencyBump, type PackageReleaseOutcome, type ReleaseWorkspaceOptions, type WorkspaceReleaseOutcome } from './release';
 import { updateDependencyRange } from './version-range';
 import { discoverWorkspace, type WorkspacePackage } from './workspace';
 import { DEFAULT_TAG_FORMAT, formatTagForPackage, validateTagFormat } from './tag-format';
@@ -28,6 +42,51 @@ import { DEFAULT_TAG_FORMAT, formatTagForPackage, validateTagFormat } from './ta
  * Why publish is not just another semantic-release() call: semantic-release's own `run()` unconditionally derives `lastRelease` from the newest tag already on the branch matching `tagFormat`, and this mode has, by the time phase 5 runs, already created and pushed that exact tag itself. A second real `semanticRelease()` call would see its own just-created tag as the already-published release and compute the wrong next version from it. Phase 5 instead calls each resolved plugin module's own exported `verifyConditions`/`publish`/`success` functions directly, with a hand-built context -- the same public per-plugin API surface semantic-release's own core calls internally, just invoked without going through the parts of `run()` that assume a not-yet-tagged repository.
  */
 export async function releaseWorkspaceSingleCommit(options: ReleaseWorkspaceOptions): Promise<WorkspaceReleaseOutcome> {
+  const log = options.log ?? console.log;
+  const maxAttempts = resolvePushAttempts(options.pushAttempts);
+  let lastLoss: GitCommandError | undefined;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const result = await attemptSingleCommitRelease(options);
+    if (result.kind === 'complete') {
+      return result.outcome;
+    }
+    if (result.kind === 'pushed') {
+      await result.publish();
+      return result.outcome;
+    }
+    lastLoss = result.error;
+    log(
+      `${packageName}: attempt ${String(attempt)} of ${String(maxAttempts)} lost the push, because ${result.branch} advanced to ${result.remoteTip} before this run's own refs reached the remote. This attempt's commit and tags have been discarded; recomputing the release against the new tip.`,
+    );
+  }
+
+  throw new WorkspaceStateError(
+    `${packageName}: gave up after ${String(maxAttempts)} attempt(s) to push the release, each overtaken by another commit landing on the release branch first. Nothing was published and no tag reached the remote, so re-running is safe and loses nothing. Raise "pushAttempts" if this branch is busy enough that ${String(maxAttempts)} is genuinely too few. The last push failed with: ${lastLoss === undefined ? 'unknown' : lastLoss.message}`,
+  );
+}
+
+function resolvePushAttempts(configured: number | undefined): number {
+  if (configured === undefined) {
+    return DEFAULT_PUSH_ATTEMPTS;
+  }
+  if (!Number.isInteger(configured) || configured < 1) {
+    throw new ReleaseConfigurationError(`"pushAttempts" must be a positive integer; received ${String(configured)}.`);
+  }
+  return configured;
+}
+
+/**
+ * One attempt's outcome. `lost` is the only retriable one, and reaching it means the attempt has already put the checkout back where a fresh attempt can start: its commit and tags are gone and the branch sits on the remote's current tip.
+ *
+ * `pushed` hands back a `publish` callback rather than publishing itself, so that phase 5 stays outside the retry loop by construction. Publishing is the one step that cannot be undone, and the type makes it unreachable until a push has actually succeeded.
+ */
+type SingleCommitAttempt =
+  | { readonly kind: 'complete'; readonly outcome: WorkspaceReleaseOutcome }
+  | { readonly kind: 'pushed'; readonly outcome: WorkspaceReleaseOutcome; readonly publish: () => Promise<void> }
+  | { readonly kind: 'lost'; readonly error: GitCommandError; readonly branch: string; readonly remoteTip: string };
+
+async function attemptSingleCommitRelease(options: ReleaseWorkspaceOptions): Promise<SingleCommitAttempt> {
   const root = resolve(options.root ?? process.cwd());
   const log = options.log ?? console.log;
   const dryRun = options.dryRun === true;
@@ -111,7 +170,7 @@ export async function releaseWorkspaceSingleCommit(options: ReleaseWorkspaceOpti
   }
 
   if (dryRun || planned.length === 0) {
-    return { order, packages: outcomes };
+    return { kind: 'complete', outcome: { order, packages: outcomes } };
   }
 
   const branch = captured.branch;
@@ -170,31 +229,57 @@ export async function releaseWorkspaceSingleCommit(options: ReleaseWorkspaceOpti
   for (const tagName of tagNames) {
     await createTag(tagName, commitSha, { cwd: repoRoot });
   }
-  await pushHeadAndTags(tagNames, { cwd: repoRoot });
+  const branchName = await currentBranch({ cwd: repoRoot });
+  try {
+    await pushHeadAndTags(tagNames, { cwd: repoRoot });
+  } catch (error) {
+    if (!(error instanceof GitCommandError)) {
+      throw error;
+    }
+    // Whether this is a race is a question about the remote, not about the words git chose for the rejection: if the branch's current tip is still reachable from this attempt's HEAD then the push would have fast-forwarded, so something other than a competing commit refused it (a pre-receive hook, a ruleset, a protected branch) and repeating the attempt would only fail the same way.
+    let remoteTip: string;
+    try {
+      remoteTip = await fetchBranchTip(branchName, { cwd: repoRoot });
+    } catch {
+      // The remote cannot be reached at all, so the push failure is the real problem and is the one worth reporting, not this secondary symptom of it.
+      throw error;
+    }
+    if (await isAncestor(remoteTip, 'HEAD', { cwd: repoRoot })) {
+      throw error;
+    }
+    // Nothing has published yet, and `--atomic` means no tag reached the remote, so this attempt can be discarded outright. Tags go first: `git tag` refuses a name that already exists, so leaving them would make the next attempt fail while tagging rather than while pushing.
+    await deleteLocalTags(tagNames, { cwd: repoRoot });
+    await resetHardTo(remoteTip, { cwd: repoRoot });
+    return { kind: 'lost', error, branch: branchName, remoteTip };
+  }
   log(`${packageName}: committed ${commitSha} and pushed ${String(tagNames.length)} tag(s): ${tagNames.join(', ')}`);
 
-  // Phase 5: publish, then success, per released package.
-  for (const release of planned) {
-    const releases: unknown[] = [];
-    for (const [modulePath, pluginConfig] of mustGet(resolvedPlugins, release.pkg.name, 'publish plugins')) {
-      const plugin = await loadReleasePlugin(modulePath, moduleCache);
-      if (plugin.publish) {
-        const result = await plugin.publish(pluginConfig, buildPluginContext(release, shared, capturedCommits, releases));
-        if (result !== false && result !== undefined) {
-          releases.push(result);
+  return {
+    kind: 'pushed',
+    outcome: { order, packages: outcomes },
+    // Phase 5: publish, then success, per released package. Deliberately a callback the caller invokes only once the push above has landed, so no retry path can ever reach it.
+    publish: async () => {
+      for (const release of planned) {
+        const releases: unknown[] = [];
+        for (const [modulePath, pluginConfig] of mustGet(resolvedPlugins, release.pkg.name, 'publish plugins')) {
+          const plugin = await loadReleasePlugin(modulePath, moduleCache);
+          if (plugin.publish) {
+            const result = await plugin.publish(pluginConfig, buildPluginContext(release, shared, capturedCommits, releases));
+            if (result !== false && result !== undefined) {
+              releases.push(result);
+            }
+          }
         }
+        for (const [modulePath, pluginConfig] of mustGet(resolvedPlugins, release.pkg.name, 'publish plugins')) {
+          const plugin = await loadReleasePlugin(modulePath, moduleCache);
+          if (plugin.success) {
+            await plugin.success(pluginConfig, buildPluginContext(release, shared, capturedCommits, releases));
+          }
+        }
+        log(`${release.pkg.name}: published ${release.gitTag}`);
       }
-    }
-    for (const [modulePath, pluginConfig] of mustGet(resolvedPlugins, release.pkg.name, 'publish plugins')) {
-      const plugin = await loadReleasePlugin(modulePath, moduleCache);
-      if (plugin.success) {
-        await plugin.success(pluginConfig, buildPluginContext(release, shared, capturedCommits, releases));
-      }
-    }
-    log(`${release.pkg.name}: published ${release.gitTag}`);
-  }
-
-  return { order, packages: outcomes };
+    },
+  };
 }
 
 interface PlannedPackageRelease {
