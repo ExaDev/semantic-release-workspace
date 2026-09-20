@@ -66,11 +66,7 @@ Everything above describes `commitStrategy: 'per-package'`, the default: unchang
 | Default publish plugins | `DEFAULT_PUBLISH_PLUGINS` (changelog, npm, github, git) | `SINGLE_COMMIT_DEFAULT_PUBLISH_PLUGINS` — the same list minus git |
 | Crash recovery        | A bump commit already sitting in git history (from this run or an earlier one) is recognised via a machine-parseable trailer, so a run that resumes after a partial push still forces the right dependent releases | Not needed: either the whole combined commit lands and pushes, or the run fails before touching git at all, so there is never a partial push to recover from |
 
-Everything about *what* releases (topological order, forced-patch dependents, dependency-range classification, path-scoped commit analysis, unsupported-range rejection) is identical between the two modes — `commitStrategy` only changes how the result is committed, tagged, and pushed. ## Tag format
-
-Each package's release tag comes from the `tagFormat` option, a lodash template with `${name}` and `${version}` placeholders, defaulting to `'${name}@${version}'`. Set it via the `tagFormat` field in a `--config` file or the `tagFormat` option to `releaseWorkspace()`. The template must contain `${version}` and may contain `${name}`; anything else is rejected before any package releases.
-
-Override it when the tags are consumed as refs outside git: GitHub Actions pins composite actions as `owner/repo/path@ref`, and GitHub's workflow parser rejects a ref containing `@` -- so a repository of actions sets `'${name}-v${version}'` and every workflow pins `...@<action>-v<major>`. Note that switching an existing repository's format starts a fresh tag namespace: semantic-release will not see prior releases recorded under the old format, so rename existing tags to the new template as part of the switch.
+Everything about *what* releases (topological order, forced-patch dependents, dependency-range classification, path-scoped commit analysis, unsupported-range rejection) is identical between the two modes — `commitStrategy` only changes how the result is committed, tagged, and pushed.
 
 Set it via the `--commit-strategy <mode>` CLI flag, the `commitStrategy` field in a `--config` file, or the `commitStrategy` option to `releaseWorkspace()`; omit it and nothing changes.
 
@@ -83,6 +79,18 @@ Under `commitStrategy: 'per-package'` a release is a sequence of independent pus
 One window is outside this tool's control: semantic-release pushes a package's tag before running its publish plugins, and that push is not atomic, so a rejection there can leave a tag on the remote for a version that never reached npm. Nothing is corrupted and no later release is blocked, but that version number is skipped. If it happens, find the tag with no matching published version (`npm view <name> versions`) and either publish from it by hand or delete the tag locally and on the remote and let the next run recompute it.
 
 If you need a run to be strictly all-or-nothing, use `commitStrategy: 'single'`, which makes one commit and one atomic push before anything publishes, and which retries the whole attempt against the new tip when that push loses a race.
+
+## Tag format
+
+Each package's release tag comes from the `tagFormat` option, a lodash template with `${name}` and `${version}` placeholders, defaulting to `'${name}@${version}'`. Set it with the `--tag-format <template>` CLI flag, the `tagFormat` field in a `--config` file, or the `tagFormat` option to `releaseWorkspace()`; when both the flag and the config file set it, the flag wins. The template must contain `${version}` and may contain `${name}`; anything else is rejected before any package releases.
+
+Override it when the tags are consumed as refs outside git: GitHub Actions pins composite actions as `owner/repo/path@ref`, and GitHub's workflow parser rejects a ref containing `@` -- so a repository of actions sets `'${name}-v${version}'` and every workflow pins `...@<action>-v<major>`. Note that switching an existing repository's format starts a fresh tag namespace: semantic-release will not see prior releases recorded under the old format, so rename existing tags to the new template as part of the switch.
+
+```sh
+pnpm exec semantic-release-workspace release --tag-format '${name}-v${version}'
+```
+
+A gated run records each package's tag in its state file, so `resume` takes no tag format of its own.
 
 ## Gating publish
 
@@ -219,6 +227,7 @@ Run it from the workspace root (or pass `--root <directory>`). A dry run analyse
 | `--analyze-commits <json>` | Options for the wrapped @semantic-release/commit-analyzer (e.g. `'{"preset":"conventionalcommits","releaseRules":[...]}'`) |
 | `--generate-notes <json>` | Options for the wrapped @semantic-release/release-notes-generator |
 | `--commit-strategy <mode>` | `per-package` (default) or `single` — see [Commit strategies](#commit-strategies) |
+| `--tag-format <template>` | Template for each package's release tag, with `${name}` and `${version}` placeholders; must contain `${version}` (default: `${name}@${version}`) — see [Tag format](#tag-format) |
 | `--gate-publish` | Tag and push each due package, but defer publishing — see [Gating publish](#gating-publish). Requires `--gate-state-file`; rejected with `--commit-strategy single` |
 | `--gate-state-file <path>` | With `--gate-publish`: where to write the state a later `resume` run needs |
 | `--config <file>` | A config file (`.json`, `.yaml`, `.yml`, `.js`, `.cjs`, `.mjs`, `.ts`, `.cts`, or `.mts`, loaded via [cosmiconfig](https://github.com/cosmiconfig/cosmiconfig)) providing any of the above, plus `packagePlugins` (see [Per-package publish plugins](#per-package-publish-plugins)), through its default export; explicit flags win. TypeScript files are run by Node's own type stripping, so they may use only erasable type syntax (annotations and `import type`, not `enum` or `namespace`) |
