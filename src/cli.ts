@@ -4,12 +4,13 @@ import { cosmiconfig } from 'cosmiconfig';
 import { Command, InvalidArgumentError } from 'commander';
 // resolveJsonModule lets rolldown (via tsdown) inline this package's own declared version straight into the bundle at build time -- no runtime fs read.
 import { version } from '../package.json';
-import { WorkspaceReleaseError } from './errors';
+import { ReleaseConfigurationError, WorkspaceReleaseError } from './errors';
 import { isDetachedPackageReleaseArray, resumeWorkspaceRelease } from './gate-publish';
 import { isJsonObject, isStringArray, isUnknownArray } from './json';
 import { packageName } from './package-name';
 import { type PackagePluginSpecs, type PublishPluginSpec } from './plugins';
 import { releaseWorkspace, type CommitStrategy, type PackageReleaseOutcome } from './release';
+import { validateTagFormat } from './tag-format';
 
 const CONFIG_OPTION_KEYS: ReadonlySet<string> = new Set([
   'dryRun',
@@ -20,6 +21,7 @@ const CONFIG_OPTION_KEYS: ReadonlySet<string> = new Set([
   'generateNotes',
   'commitStrategy',
   'gatePublish',
+  'tagFormat',
 ]);
 const COMMIT_STRATEGIES: ReadonlySet<string> = new Set<CommitStrategy>(['per-package', 'single']);
 
@@ -54,6 +56,11 @@ export function createProgram(): Command {
     parseCommitStrategy,
   );
   release.option(
+    '--tag-format <template>',
+    'template for each package\'s release tag, with ${name} and ${version} placeholders; must contain ${version} (default: ${name}@${version})',
+    parseTagFormat,
+  );
+  release.option(
     '--gate-publish',
     'tag and push each due package via @exadev/release-gate, but defer publishing -- requires --gate-state-file, and cannot be combined with --commit-strategy single',
   );
@@ -63,7 +70,7 @@ export function createProgram(): Command {
   );
   release.option(
     '--config <file>',
-    'config file (.json, .yaml, .yml, .js, .cjs, or .ts) providing any of the release options (dryRun, branches, plugins, packagePlugins, analyzeCommits, generateNotes, commitStrategy, gatePublish); explicit flags win',
+    'config file (.json, .yaml, .yml, .js, .cjs, or .ts) providing any of the release options (dryRun, branches, plugins, packagePlugins, analyzeCommits, generateNotes, commitStrategy, tagFormat, gatePublish); explicit flags win',
   );
   release.action(runRelease);
 
@@ -83,6 +90,24 @@ function parseCommitStrategy(value: string): CommitStrategy {
   return value;
 }
 
+function parseTagFormat(value: string): string {
+  return validateTagFormatOption(value, (message) => message);
+}
+
+/**
+ * Runs `validateTagFormat` and turns its `ReleaseConfigurationError` into the `InvalidArgumentError` the CLI reports as a usage mistake. `describe` lets each caller say where the value came from (a flag needs no prefix, since commander already names the option; a config file entry needs the file's path).
+ */
+function validateTagFormatOption(value: string, describe: (message: string) => string): string {
+  try {
+    return validateTagFormat(value);
+  } catch (cause) {
+    if (cause instanceof ReleaseConfigurationError) {
+      throw new InvalidArgumentError(describe(cause.message));
+    }
+    throw cause;
+  }
+}
+
 interface ReleaseFlags {
   readonly root: string;
   readonly dryRun: boolean | undefined;
@@ -91,6 +116,7 @@ interface ReleaseFlags {
   readonly analyzeCommits: string | undefined;
   readonly generateNotes: string | undefined;
   readonly commitStrategy: CommitStrategy | undefined;
+  readonly tagFormat: string | undefined;
   readonly gatePublish: boolean | undefined;
   readonly gateStateFile: string | undefined;
   readonly config: string | undefined;
@@ -104,6 +130,7 @@ const NO_CONFIG_FILE: ReleaseConfigFile = {
   analyzeCommits: undefined,
   generateNotes: undefined,
   commitStrategy: undefined,
+  tagFormat: undefined,
   gatePublish: undefined,
 };
 
@@ -125,6 +152,7 @@ async function runRelease(flags: ReleaseFlags): Promise<void> {
     analyzeCommits: flags.analyzeCommits === undefined ? file.analyzeCommits : parseJsonObjectFlag(flags.analyzeCommits, '--analyze-commits'),
     generateNotes: flags.generateNotes === undefined ? file.generateNotes : parseJsonObjectFlag(flags.generateNotes, '--generate-notes'),
     commitStrategy: flags.commitStrategy ?? file.commitStrategy,
+    tagFormat: flags.tagFormat ?? file.tagFormat,
     gatePublish,
   });
 
@@ -212,6 +240,7 @@ export interface ReleaseConfigFile {
   readonly analyzeCommits: Record<string, unknown> | undefined;
   readonly generateNotes: Record<string, unknown> | undefined;
   readonly commitStrategy: CommitStrategy | undefined;
+  readonly tagFormat: string | undefined;
   readonly gatePublish: boolean | undefined;
 }
 
@@ -242,7 +271,7 @@ export async function readReleaseConfigFile(path: string): Promise<ReleaseConfig
     }
   }
 
-  const { dryRun, branches, plugins, packagePlugins, analyzeCommits, generateNotes, commitStrategy, gatePublish } = parsed;
+  const { dryRun, branches, plugins, packagePlugins, analyzeCommits, generateNotes, commitStrategy, tagFormat, gatePublish } = parsed;
   if (dryRun !== undefined && typeof dryRun !== 'boolean') {
     throw new InvalidArgumentError(`--config file ${path}: "dryRun" must be a boolean`);
   }
@@ -264,6 +293,9 @@ export async function readReleaseConfigFile(path: string): Promise<ReleaseConfig
   if (commitStrategy !== undefined && (typeof commitStrategy !== 'string' || !isCommitStrategy(commitStrategy))) {
     throw new InvalidArgumentError(`--config file ${path}: "commitStrategy" must be one of: ${[...COMMIT_STRATEGIES].join(', ')}`);
   }
+  if (tagFormat !== undefined && typeof tagFormat !== 'string') {
+    throw new InvalidArgumentError(`--config file ${path}: "tagFormat" must be a string`);
+  }
   if (gatePublish !== undefined && typeof gatePublish !== 'boolean') {
     throw new InvalidArgumentError(`--config file ${path}: "gatePublish" must be a boolean`);
   }
@@ -276,6 +308,7 @@ export async function readReleaseConfigFile(path: string): Promise<ReleaseConfig
     analyzeCommits,
     generateNotes,
     commitStrategy,
+    tagFormat: tagFormat === undefined ? undefined : validateTagFormatOption(tagFormat, (message) => `--config file ${path}: ${message}`),
     gatePublish,
   };
 }

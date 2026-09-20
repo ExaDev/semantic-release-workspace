@@ -2,12 +2,19 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { InvalidArgumentError } from 'commander';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createProgram, readReleaseConfigFile } from './cli';
+import { git } from './git';
+import { createWorkspaceFixture, type FixturePackage } from './git-workspace-fixture';
+import { type PublishPluginSpec } from './plugins';
+import { releaseEnv } from './release-env-fixture';
+import { TestTimeoutMs } from './test-timeouts';
 
 const temporaryDirectories: string[] = [];
 
 afterEach(async () => {
+  vi.restoreAllMocks();
+  vi.unstubAllEnvs();
   await Promise.all(temporaryDirectories.splice(0).map(async (directory) => rm(directory, { recursive: true, force: true })));
 });
 
@@ -170,6 +177,34 @@ describe('readReleaseConfigFile', () => {
     await expect(readReleaseConfigFile(path)).rejects.toThrow(InvalidArgumentError);
     await expect(readReleaseConfigFile(path)).rejects.toThrow(/"gatePublish" must be a boolean/);
   });
+
+  it('reads a tagFormat', async () => {
+    const path = await temporaryConfigFile('release.config.json', JSON.stringify({ tagFormat: '${name}-v${version}' }));
+    expect((await readReleaseConfigFile(path)).tagFormat).toBe('${name}-v${version}');
+  });
+
+  it('leaves tagFormat undefined when the config file omits it, so releaseWorkspace applies its own default template', async () => {
+    const path = await temporaryConfigFile('release.config.json', JSON.stringify({ dryRun: true }));
+    expect((await readReleaseConfigFile(path)).tagFormat).toBeUndefined();
+  });
+
+  it('rejects a tagFormat that is not a string', async () => {
+    const path = await temporaryConfigFile('release.config.json', JSON.stringify({ tagFormat: 3 }));
+    await expect(readReleaseConfigFile(path)).rejects.toThrow(InvalidArgumentError);
+    await expect(readReleaseConfigFile(path)).rejects.toThrow(/"tagFormat" must be a string/);
+  });
+
+  it('rejects a tagFormat without the version placeholder', async () => {
+    const path = await temporaryConfigFile('release.config.json', JSON.stringify({ tagFormat: '${name}' }));
+    await expect(readReleaseConfigFile(path)).rejects.toThrow(InvalidArgumentError);
+    await expect(readReleaseConfigFile(path)).rejects.toThrow(/--config file .*: tagFormat must contain '\$\{version\}'/);
+  });
+
+  it('rejects a tagFormat with a placeholder other than name and version', async () => {
+    const path = await temporaryConfigFile('release.config.json', JSON.stringify({ tagFormat: '${package}-v${version}' }));
+    await expect(readReleaseConfigFile(path)).rejects.toThrow(InvalidArgumentError);
+    await expect(readReleaseConfigFile(path)).rejects.toThrow(/--config file .*: tagFormat supports only.*unknown token\(s\): \$\{package\}/);
+  });
 });
 
 describe('createProgram', () => {
@@ -190,4 +225,98 @@ describe('createProgram', () => {
     const optionFlags = (resume?.options ?? []).map((option) => option.long);
     expect(optionFlags).toContain('--root');
   });
+
+  it('registers --tag-format on the release command', () => {
+    const release = createProgram().commands.find((command) => command.name() === 'release');
+    expect((release?.options ?? []).map((option) => option.long)).toContain('--tag-format');
+  });
+
+  it('rejects an invalid --tag-format as an invalid argument, before any release work starts', async () => {
+    const release = createProgram().commands.find((command) => command.name() === 'release');
+    expect(release).toBeDefined();
+    release?.exitOverride().configureOutput({ writeErr: () => undefined });
+    await expect(release?.parseAsync(['--tag-format', '${name}'], { from: 'user' })).rejects.toMatchObject({
+      code: 'commander.invalidArgument',
+      message: expect.stringMatching(/--tag-format.*must contain '\$\{version\}'/) as unknown,
+    });
+  });
+});
+
+const singlePackage: readonly FixturePackage[] = [{ name: '@fixture/a', version: '1.0.0' }];
+
+/** The offline publish pipeline the fixture-backed release tests use, as `--plugin` flag values: the npm plugin still bumps the manifest and the git plugin still commits it, but nothing reaches a registry or GitHub. */
+const FIXTURE_PLUGINS: readonly PublishPluginSpec[] = [
+  ['@semantic-release/npm', { npmPublish: false }],
+  ['@semantic-release/git', { assets: ['package.json'], message: 'chore(release): ${nextRelease.gitTag} [skip ci]' }],
+];
+const FIXTURE_PLUGIN_FLAGS: readonly string[] = FIXTURE_PLUGINS.flatMap((plugin) => ['--plugin', JSON.stringify(plugin)]);
+
+/**
+ * Runs the release command through the real command tree in this process. The CLI takes its environment from `process.env`, so the CI-stripped environment the library-level tests pass as an option is applied to `process.env` itself for the duration of the test. Returns every line the command printed.
+ */
+async function runReleaseCommand(args: readonly string[]): Promise<string[]> {
+  const environment = releaseEnv();
+  for (const key of Object.keys(process.env)) {
+    if (!(key in environment)) {
+      vi.stubEnv(key, undefined);
+    }
+  }
+  vi.stubEnv('CI', 'true');
+  const printed: string[] = [];
+  vi.spyOn(console, 'log').mockImplementation((line: unknown) => {
+    printed.push(String(line));
+  });
+  await createProgram().parseAsync(['release', ...args], { from: 'user' });
+  return printed;
+}
+
+describe('release command tag format', () => {
+  it('tags a released package in the format a --config file sets', async () => {
+    const fixture = await createWorkspaceFixture(singlePackage, [
+      { message: 'feat(a): feature', files: { 'packages/a/src/index.js': 'export const a = 2;\n' } },
+    ], { tagFormat: '${name}-v${version}' });
+    try {
+      const config = await temporaryConfigFile('release.config.json', JSON.stringify({ tagFormat: '${name}-v${version}' }));
+      const printed = await runReleaseCommand(['--root', fixture.root, '--config', config, ...FIXTURE_PLUGIN_FLAGS]);
+
+      expect(printed).toContain('@fixture/a: @fixture/a-v1.1.0 (minor)');
+      const tags = (await git(['tag', '--list'], { cwd: fixture.root })).split('\n').filter(Boolean);
+      expect(tags).toContain('@fixture/a-v1.1.0');
+      expect(tags).not.toContain('@fixture/a@1.1.0');
+    } finally {
+      await fixture.remove();
+    }
+  }, TestTimeoutMs.Long);
+
+  it('tags a released package in the format --tag-format sets, with no config file', async () => {
+    const fixture = await createWorkspaceFixture(singlePackage, [
+      { message: 'feat(a): feature', files: { 'packages/a/src/index.js': 'export const a = 2;\n' } },
+    ], { tagFormat: '${name}-v${version}' });
+    try {
+      const printed = await runReleaseCommand([
+        '--root', fixture.root, '--tag-format', '${name}-v${version}', ...FIXTURE_PLUGIN_FLAGS,
+      ]);
+
+      expect(printed).toContain('@fixture/a: @fixture/a-v1.1.0 (minor)');
+      const tags = (await git(['tag', '--list'], { cwd: fixture.root })).split('\n').filter(Boolean);
+      expect(tags).toContain('@fixture/a-v1.1.0');
+    } finally {
+      await fixture.remove();
+    }
+  }, TestTimeoutMs.Long);
+
+  it('lets --tag-format override the tagFormat in a --config file', async () => {
+    // History carries tags in the flag's format. Were the file's format used instead, semantic-release would find no previous release and report a first release under the file's template.
+    const fixture = await createWorkspaceFixture(singlePackage, [
+      { message: 'feat(a): feature', files: { 'packages/a/src/index.js': 'export const a = 2;\n' } },
+    ], { tagFormat: '${name}-v${version}' });
+    try {
+      const config = await temporaryConfigFile('release.config.json', JSON.stringify({ tagFormat: '${name}-from-file-${version}' }));
+      const printed = await runReleaseCommand(['--root', fixture.root, '--dry-run', '--config', config, '--tag-format', '${name}-v${version}']);
+
+      expect(printed).toContain('@fixture/a: @fixture/a-v1.1.0 (minor)');
+    } finally {
+      await fixture.remove();
+    }
+  }, TestTimeoutMs.Long);
 });
