@@ -2,8 +2,8 @@ import { resolve } from 'node:path';
 import semanticRelease from 'semantic-release';
 import type { BranchSpec, Options, Result } from 'semantic-release';
 import { formatDependencyBumpMessage } from './dependency-bump-commit';
-import { ReleaseConfigurationError, WorkspaceReleaseError } from './errors';
-import { commitFiles, pushHead, resolveCommitIdentity, sanitizeGitEnv, type CommitIdentity } from './git';
+import { ReleaseConfigurationError, WorkspaceReleaseError, WorkspaceStateError } from './errors';
+import { commitFiles, currentBranch, fastForwardTo, fetchBranchTip, isAncestor, pushHead, resolveCommitIdentity, sanitizeGitEnv, type CommitIdentity } from './git';
 import { buildDependencyGraph, mustGet, orderedPackages, topologicalOrder, validateDependencyRanges, type DependencyGraph } from './graph';
 import { packageName } from './package-name';
 import {
@@ -209,7 +209,7 @@ export async function runReleaseLoop<TResult>(
     const bumpsForThisPackage = pendingBumps.get(name) ?? [];
 
     log(`Releasing ${name} from ${pkg.relativeDirectory}${bumpsForThisPackage.length > 0 ? ` (dependency ranges already bumped: ${bumpsForThisPackage.map((bump) => bump.dependency).join(', ')})` : ''}`);
-    const { released, version, result } = await releaseOne(pkg, bumpsForThisPackage);
+    const { released, version, result } = await releasePackageAcrossBranchMoves(name, pkg, bumpsForThisPackage, workspace, dryRun, log, releaseOne);
 
     entries.push({ name, directory: pkg.directory, relativeDirectory: pkg.relativeDirectory, result, dependencyBumps: bumpsForThisPackage });
     pendingBumps.delete(name);
@@ -331,3 +331,71 @@ async function bumpDependents(released: WorkspacePackage, version: string, graph
   return applied;
 }
 
+/**
+ * How many times one package may be re-released after the branch moved underneath its own attempt, before the run gives up loudly.
+ *
+ * There is no option for this and no derivation from a measured rate, unlike `pushAttempts`, because the shape of the problem is different. Integration happens at most once per package boundary, so the loop is already bounded by the size of the workspace; this only bounds the pathological case where the branch moves during the same package's own attempt over and over. Each round costs one package's analysis, and a branch would have to move during three consecutive attempts at the same package to exhaust it, at which point the run is being starved rather than raced and saying so is more useful than trying again.
+ */
+const MAX_BRANCH_MOVES_PER_PACKAGE = 3;
+
+/**
+ * Brings the checkout up to the release branch's current tip, and reports where that tip is.
+ *
+ * At a package boundary every commit this run has made is already on the remote (each release commit by `@semantic-release/git`'s own prepare push, each tag by semantic-release's own, each dependency bump by `pushHead`), so advancing onto a moved branch is a fast-forward and loses nothing. `fastForwardTo` refuses anything else rather than discarding local work, which would mean the assumption above had broken.
+ */
+async function integrateBranchTip(workspace: Workspace, log: (message: string) => void): Promise<string> {
+  const cwd = workspace.root;
+  const branch = await currentBranch({ cwd });
+  const tip = await fetchBranchTip(branch, { cwd });
+  if (await isAncestor(tip, 'HEAD', { cwd })) {
+    return tip;
+  }
+  if (!(await isAncestor('HEAD', tip, { cwd }))) {
+    throw new WorkspaceStateError(
+      `${packageName}: ${branch} has moved to ${tip}, which this checkout has not and cannot reach by fast-forward, so the two have diverged. A release run expects every commit it has made to already be on the remote at this point; stopping rather than discarding whatever is here.`,
+    );
+  }
+  await fastForwardTo(tip, { cwd });
+  log(`${packageName}: ${branch} advanced to ${tip} during this run; integrated it before continuing.`);
+  return tip;
+}
+
+/**
+ * Releases one package, integrating the release branch first and again whenever it moves under the attempt.
+ *
+ * This exists because semantic-release cannot tell the orchestrator the difference between the two reasons it declines to release. When the branch has moved since the run began, its `verifyAuth` fails, `isBranchUpToDate` reports the branch behind, and it returns the same "no release" the orchestrator gets for a package that genuinely had nothing to publish. Taking that at face value is how a run used to finish green having released only the packages that happened to come before the branch moved.
+ *
+ * The ambiguity is resolved by observation rather than by reading semantic-release's logs: if the branch did not move while the package was being released, "no release" is true. If it did, the answer is not trustworthy, so the branch is integrated and the package is released again against the new tip. That is safe to repeat because a package that really has nothing to release still has nothing after a fast-forward, and a package that does release is recorded by its tag, which every later run reads as the release having happened.
+ */
+async function releasePackageAcrossBranchMoves<TResult>(
+  name: string,
+  pkg: WorkspacePackage,
+  bumpsForThisPackage: readonly AppliedDependencyBump[],
+  workspace: Workspace,
+  dryRun: boolean,
+  log: (message: string) => void,
+  releaseOne: (pkg: WorkspacePackage, bumps: readonly AppliedDependencyBump[]) => Promise<{ readonly released: boolean; readonly version: string | undefined; readonly result: TResult }>,
+): Promise<{ readonly released: boolean; readonly version: string | undefined; readonly result: TResult }> {
+  // A dry run pushes nothing and publishes nothing, so there is no branch state for it to race against and nothing to integrate.
+  if (dryRun) {
+    return await releaseOne(pkg, bumpsForThisPackage);
+  }
+
+  for (let moves = 0; ; moves += 1) {
+    const tipBefore = await integrateBranchTip(workspace, log);
+    const outcome = await releaseOne(pkg, bumpsForThisPackage);
+    if (outcome.released) {
+      return outcome;
+    }
+    const tipAfter = await fetchBranchTip(await currentBranch({ cwd: workspace.root }), { cwd: workspace.root });
+    if (tipAfter === tipBefore) {
+      return outcome;
+    }
+    if (moves + 1 >= MAX_BRANCH_MOVES_PER_PACKAGE) {
+      throw new WorkspaceStateError(
+        `${packageName}: ${name} reported no release ${String(moves + 1)} times, each time while the release branch was moving underneath it, so whether it had anything to release was never established. Failing rather than finishing the run as though it had nothing, which would leave this package and every one after it silently unreleased. Re-running once the branch is quieter is safe: packages that already released are recorded by their tags and are not released again.`,
+      );
+    }
+    log(`${name}: reported no release while the branch moved from ${tipBefore} to ${tipAfter}, which is also what a stale branch looks like; integrating and releasing it again.`);
+  }
+}

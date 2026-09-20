@@ -214,6 +214,11 @@ export async function isAncestor(ancestor: string, descendant: string, options: 
   }
 }
 
+/** Advances the current branch to `ref`, refusing unless that is a fast-forward. Used where every local commit is already on the remote, so anything that is not a fast-forward means the checkout holds work the remote does not, and stopping is better than the alternative of discarding it. */
+export async function fastForwardTo(ref: string, options: GitCommandOptions): Promise<void> {
+  await git(['merge', '--ff-only', ref], options);
+}
+
 /** Discards every commit and working-tree change the current attempt made, putting the checkout back on exactly `ref`. */
 export async function resetHardTo(ref: string, options: GitCommandOptions): Promise<void> {
   await git(['reset', '--hard', ref], options);

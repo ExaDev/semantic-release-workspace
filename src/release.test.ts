@@ -1,5 +1,6 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { formatDependencyBumpMessage } from './dependency-bump-commit';
 import { DependencyCycleError, ReleaseConfigurationError, UnsupportedDependencyRangeError } from './errors';
@@ -619,3 +620,76 @@ async function writeManifestVersion(root: string, packageName: string, version: 
   const manifest = await readManifest(root, packageName);
   await writeFile(path, `${JSON.stringify({ ...manifest, version }, null, 2)}\n`, 'utf8');
 }
+
+/**
+ * A `post-receive` hook on the bare remote that lands a real `feat(b)` commit on it immediately after the Nth push is accepted, then lets everything carry on.
+ *
+ * It has to be `post-receive` on the remote rather than `pre-push` on the working repository to reach the case this test is about. `commitStrategy: 'per-package'` finishes a package with the orchestrator's own dependency-bump push, and the next package's first contact with the remote is semantic-release's `verifyAuth` probe, which passes `--no-verify` and is a `--dry-run`, so it neither runs a local hook nor reaches the remote. There is therefore no push to intercept between the two packages, and only the remote itself can advance in that gap. Counting receives rather than pushes also means the competing push this hook makes is itself counted, so it cannot re-trigger and recurse.
+ */
+async function landCommitAfterNthReceive(remote: string, remoteUrl: string, counterFile: string, sabotageOn: number): Promise<void> {
+  await git(['config', 'core.hooksPath', 'hooks'], { cwd: remote });
+  await writeFile(
+    join(remote, 'hooks', 'post-receive'),
+    [
+      '#!/bin/sh',
+      'set -e',
+      'unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_QUARANTINE_PATH GIT_PUSH_OPTION_COUNT',
+      `COUNTER=${JSON.stringify(counterFile)}`,
+      'echo receive >> "$COUNTER"',
+      'COUNT=$(wc -l < "$COUNTER" | tr -d " ")',
+      `if [ "$COUNT" -ne ${String(sabotageOn)} ]; then exit 0; fi`,
+      'WORK=$(mktemp -d)',
+      `git clone --quiet ${JSON.stringify(remoteUrl)} "$WORK/clone"`,
+      'cd "$WORK/clone"',
+      'git config user.name "Competing Pusher"',
+      'git config user.email "competing@example.com"',
+      'mkdir -p packages/b/src',
+      'printf "export const competing = 1;\\n" > packages/b/src/competing.js',
+      'git add -- packages/b/src/competing.js',
+      'git commit --quiet -m "feat(b): competing feature landed between packages"',
+      'git push --quiet origin HEAD:main',
+      'rm -rf "$WORK"',
+      'exit 0',
+      '',
+    ].join('\n'),
+    { mode: 0o755 },
+  );
+}
+
+
+/** How many times one released package's own release reaches the remote under `commitStrategy: 'per-package'`: `\@semantic-release/git`'s prepare push, then semantic-release's own tag push and its separate notes push, then the orchestrator's dependency-bump push. */
+const RECEIVES_PER_RELEASED_PACKAGE = 4;
+
+describe('releaseWorkspace with commitStrategy "per-package" when the branch moves between packages', () => {
+  it('releases the later packages against the new tip instead of silently skipping them', async () => {
+    const fixture = await createWorkspaceFixture(
+      [
+        { name: '@fixture/a', version: '1.0.0' },
+        { name: '@fixture/b', version: '1.0.0', dependencies: { '@fixture/a': '^1.0.0' } },
+      ],
+      [{ message: 'feat(a): a feature worth releasing', files: { 'packages/a/src/index.js': 'export const a = 2;\n' } }],
+    );
+    try {
+      // @fixture/a's release reaches the remote four times: @semantic-release/git's prepare push, then core's tag push and its separate notes push, then the orchestrator's own dependency-bump push. Landing a commit right after the fourth leaves the branch stale for @fixture/b, which is the package that used to be skipped in silence.
+      await landCommitAfterNthReceive(fixture.remote, pathToFileURL(fixture.remote).href, join(fixture.root, '..', 'receives.log'), RECEIVES_PER_RELEASED_PACKAGE);
+
+      const outcome = await releaseWorkspace({ root: fixture.root, env: releaseEnv(), plugins: FIXTURE_PLUGINS, commitStrategy: 'per-package' });
+
+      const byName = new Map(outcome.packages.map((pkg) => [pkg.name, pkg]));
+      // @fixture/a published before the branch moved and must be left exactly as it was.
+      expect(byName.get('@fixture/a')).toMatchObject({ released: true, version: '1.1.0' });
+      // @fixture/b is the assertion that matters: before this fix it came back released: false, indistinguishable from having nothing to release, and the run still exited green. The version is the second half of it: a dependency bump alone would have made this a patch, so 1.1.0 is only reachable by analysing the competing feat that landed after @fixture/a finished, which means the version was recomputed against the new tip rather than replayed from the stale one.
+      expect(byName.get('@fixture/b')).toMatchObject({ released: true, version: '1.1.0', type: 'minor' });
+
+      const tags = (await git(['ls-remote', '--tags', fixture.remote], { cwd: fixture.root }))
+        .split('\n')
+        .map((line) => line.split('refs/tags/')[1])
+        .filter((tag): tag is string => tag !== undefined && !tag.endsWith('^{}'));
+      expect(tags).toContain('@fixture/a@1.1.0');
+      expect(tags.some((tag) => tag.startsWith('@fixture/b@1.'))).toBe(true);
+    } finally {
+      await fixture.remove();
+    }
+  }, TestTimeoutMs.Long);
+
+});
