@@ -64,7 +64,18 @@ export interface ReleaseWorkspaceOptions {
    * and pins `...@<action>-v1`. Validated once per run by `validateTagFormat`.
    */
   readonly tagFormat?: string;
+  /**
+   * How many times `commitStrategy: 'single'` will compute and push a release before giving up, when each attempt is lost to another commit landing on the release branch first. Defaults to `DEFAULT_PUSH_ATTEMPTS`. Ignored by `commitStrategy: 'per-package'`, which pushes incrementally and has no all-or-nothing attempt to repeat.
+   *
+   * The default is derived rather than chosen. An attempt is lost if any commit lands during its own window, so with pushes arriving at rate `L` and an attempt taking `W`, an attempt survives with probability `e^(-L*W)` and `n` attempts all fail with probability `(1 - e^(-L*W))^n`. On the busiest repository this tool serves, pushes to the release branch arrived at roughly one every 7.4 minutes while a merge queue was landing pull requests continuously (measured over the busiest 60, 90 and 120 minute windows, which agreed to within 6%), and analysing, preparing, committing and pushing 23 packages took about 2.2 minutes, so `W = 3` minutes leaves headroom for a larger workspace. That gives about a one-in-three chance of losing any single attempt, which matches what was observed when there was no retry at all, and 5 attempts put the chance of losing all of them near 0.4%, or roughly one lost release a month at ten releases a day. Five attempts also bound the added time at about 15 minutes, well inside the hour-long job timeouts these releases run under.
+   *
+   * Raise it for a busier branch or a slower workspace; the cost of a higher bound is only paid when attempts are actually being lost.
+   */
+  readonly pushAttempts?: number;
 }
+
+/** See `ReleaseWorkspaceOptions.pushAttempts` for how this number is derived. */
+export const DEFAULT_PUSH_ATTEMPTS = 5;
 
 /** One dependency-range change applied to a dependent package's manifest during the run, attached to the dependent's own outcome. */
 export interface AppliedDependencyBump extends DependencyBump {

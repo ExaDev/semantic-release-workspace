@@ -1,5 +1,6 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { ReleaseConfigurationError, UnsupportedDependencyRangeError } from './errors';
 import { git } from './git';
@@ -281,3 +282,141 @@ async function manifestDependency(root: string, packageName: string, dependency:
   }
   return dependencies[dependency];
 }
+
+/**
+ * Installs an executable hook, pinning `core.hooksPath` to the repository's own hooks directory first so a machine-wide `core.hooksPath` (this tool's own development machines set one) cannot shadow it and silently turn these tests into no-ops that pass for the wrong reason.
+ */
+async function installHook(gitRoot: string, name: string, script: string): Promise<void> {
+  await git(['config', 'core.hooksPath', '.git/hooks'], { cwd: gitRoot });
+  await writeFile(join(gitRoot, '.git', 'hooks', name), script, { mode: 0o755 });
+}
+
+/**
+ * A `pre-push` hook that lands a real `feat(a)` commit on the real bare remote from a separate clone, for the first `sabotagePushes` pushes only, then lets the push it is hooked into proceed.
+ *
+ * This is what makes the rejection genuine rather than mocked: git runs this hook after the orchestrator has finished analysing, preparing, committing and tagging, and immediately before it negotiates refs with the remote, so the remote really has moved by the time our refs are offered and the remote itself really rejects them as non-fast-forward. semantic-release's own `verifyAuth` probe cannot trip it, because that probe passes `--no-verify` (see its `lib/git.js`), so every hook invocation counted here is a real orchestrator push.
+ */
+async function installCompetingPusher(gitRoot: string, remoteUrl: string, counterFile: string, sabotagePushes: number): Promise<void> {
+  await installHook(
+    gitRoot,
+    'pre-push',
+    [
+      '#!/bin/sh',
+      'set -e',
+      `COUNTER=${JSON.stringify(counterFile)}`,
+      'echo push >> "$COUNTER"',
+      'COUNT=$(wc -l < "$COUNTER" | tr -d " ")',
+      `if [ "$COUNT" -gt ${String(sabotagePushes)} ]; then exit 0; fi`,
+      'WORK=$(mktemp -d)',
+      `git clone --quiet ${JSON.stringify(remoteUrl)} "$WORK/clone"`,
+      'cd "$WORK/clone"',
+      'git config user.name "Competing Pusher"',
+      'git config user.email "competing@example.com"',
+      'mkdir -p packages/a/src',
+      'printf "export const competing = %s;\\n" "$COUNT" > "packages/a/src/competing-$COUNT.js"',
+      'git add -- "packages/a/src/competing-$COUNT.js"',
+      'git commit --quiet -m "feat(a): competing feature landed mid-run"',
+      'git push --quiet origin HEAD:main',
+      'rm -rf "$WORK"',
+      'exit 0',
+      '',
+    ].join('\n'),
+  );
+}
+
+async function countPushes(counterFile: string): Promise<number> {
+  const contents = await readFile(counterFile, 'utf8').catch(() => '');
+  return contents.split('\n').filter((line) => line !== '').length;
+}
+
+async function remoteTagNames(remote: string): Promise<readonly string[]> {
+  const output = await git(['ls-remote', '--tags', remote], { cwd: remote });
+  return output
+    .split('\n')
+    .map((line) => line.split('refs/tags/')[1])
+    .filter((tag): tag is string => tag !== undefined && !tag.endsWith('^{}'))
+    .sort();
+}
+
+describe('releaseWorkspace with commitStrategy "single" when the branch moves under the run', () => {
+  const retryPackages: readonly FixturePackage[] = [{ name: '@fixture/a', version: '1.0.0' }];
+
+  it('recomputes the release against the new tip and publishes only what actually landed', async () => {
+    const fixture = await createWorkspaceFixture(retryPackages, [{ message: 'fix(a): a patch worth releasing', files: { 'packages/a/src/index.js': 'export const a = 2;\n' } }]);
+    const plugin = await createRecordingPlugin();
+    const counter = join(fixture.root, '..', 'pushes.log');
+    try {
+      await installCompetingPusher(fixture.root, pathToFileURL(fixture.remote).href, counter, 1);
+
+      const outcome = await releaseWorkspace({
+        root: fixture.root,
+        env: releaseEnv(),
+        plugins: [...SINGLE_FIXTURE_PLUGINS, plugin.modulePath],
+        commitStrategy: 'single',
+      });
+
+      // The first attempt saw only `fix(a)` and planned 1.0.1. The competing `feat(a)` landed before those refs reached the remote, so the surviving release must be the minor that accounts for it, which is the proof that the retry recomputed rather than replayed.
+      expect(outcome.packages.find((pkg) => pkg.name === '@fixture/a')).toMatchObject({ released: true, version: '1.1.0', type: 'minor' });
+
+      const tags = await remoteTagNames(fixture.remote);
+      expect(tags).toContain('@fixture/a@1.1.0');
+      expect(tags).not.toContain('@fixture/a@1.0.1');
+
+      const calls = await readRecordingPluginCalls(plugin);
+      expect(calls.publish).toEqual([{ name: '@fixture/a@1.1.0', version: '1.1.0' }]);
+      expect(await countPushes(counter)).toBe(2);
+    } finally {
+      await plugin.remove();
+      await fixture.remove();
+    }
+  }, TestTimeoutMs.Long);
+
+  it('gives up after the configured number of attempts, having published nothing and left no tag behind', async () => {
+    const fixture = await createWorkspaceFixture(retryPackages, [{ message: 'fix(a): a patch worth releasing', files: { 'packages/a/src/index.js': 'export const a = 2;\n' } }]);
+    const plugin = await createRecordingPlugin();
+    const counter = join(fixture.root, '..', 'pushes.log');
+    const tagsBefore = await remoteTagNames(fixture.remote);
+    try {
+      await installCompetingPusher(fixture.root, pathToFileURL(fixture.remote).href, counter, Number.MAX_SAFE_INTEGER);
+
+      await expect(
+        releaseWorkspace({
+          root: fixture.root,
+          env: releaseEnv(),
+          plugins: [...SINGLE_FIXTURE_PLUGINS, plugin.modulePath],
+          commitStrategy: 'single',
+          pushAttempts: 2,
+        }),
+      ).rejects.toThrow(/2 attempt/);
+
+      expect(await remoteTagNames(fixture.remote)).toEqual(tagsBefore);
+      expect((await readRecordingPluginCalls(plugin)).publish).toEqual([]);
+      expect(await countPushes(counter)).toBe(2);
+    } finally {
+      await plugin.remove();
+      await fixture.remove();
+    }
+  }, TestTimeoutMs.Long);
+
+  it('does not retry a rejection that is not a race, even though the remote rejected the refs', async () => {
+    const fixture = await createWorkspaceFixture(retryPackages, [{ message: 'fix(a): a patch worth releasing', files: { 'packages/a/src/index.js': 'export const a = 2;\n' } }]);
+    const plugin = await createRecordingPlugin();
+    const counter = join(fixture.root, '..', 'pushes.log');
+    try {
+      // The remote refuses the push outright without moving. A retry could never succeed, so the run must fail on the first rejection rather than burning every attempt on it. The bare remote gets its own `core.hooksPath` pin for the same reason the working repository does.
+      await git(['config', 'core.hooksPath', 'hooks'], { cwd: fixture.remote });
+      await writeFile(join(fixture.remote, 'hooks', 'pre-receive'), '#!/bin/sh\necho "declined by policy" >&2\nexit 1\n', { mode: 0o755 });
+      await installHook(fixture.root, 'pre-push', `#!/bin/sh\necho push >> ${JSON.stringify(counter)}\nexit 0\n`);
+
+      await expect(
+        releaseWorkspace({ root: fixture.root, env: releaseEnv(), plugins: [...SINGLE_FIXTURE_PLUGINS, plugin.modulePath], commitStrategy: 'single' }),
+      ).rejects.toThrow(/declined by policy/);
+
+      expect(await countPushes(counter)).toBe(1);
+      expect((await readRecordingPluginCalls(plugin)).publish).toEqual([]);
+    } finally {
+      await plugin.remove();
+      await fixture.remove();
+    }
+  }, TestTimeoutMs.Long);
+});
