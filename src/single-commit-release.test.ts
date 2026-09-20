@@ -9,26 +9,13 @@ import { isJsonObject } from './json';
 import { type PublishPluginSpec } from './plugins';
 import { createRecordingPlugin, readRecordingPluginCalls } from './recording-plugin-fixture';
 import { releaseWorkspace } from './release';
+import { releaseEnv } from './release-env-fixture';
 import { TestTimeoutMs } from './test-timeouts';
 
 /**
  * `@semantic-release/changelog` and `@semantic-release/npm` (with npmPublish false) are enough to exercise the real "prepare" path (version bump + changelog write) and the real "publish"/"verifyConditions" path (both skip real registry/network calls when npmPublish is false, exactly like release.test.ts's own FIXTURE_PLUGINS) without ever touching the npm registry or GitHub. `@semantic-release/git` is deliberately absent: commitStrategy "single" rejects it outright (see the dedicated test below).
  */
 const SINGLE_FIXTURE_PLUGINS: readonly PublishPluginSpec[] = ['@semantic-release/changelog', ['@semantic-release/npm', { npmPublish: false }]];
-
-/** Identical to release.test.ts's own releaseEnv: strips every CI-service marker the test runner's own CI sets so env-ci does not mistake it for the release run's CI, then re-adds CI=true so semantic-release runs in real (non-dry) mode reading the branch from the local git repository. */
-function releaseEnv(): NodeJS.ProcessEnv {
-  const CI_SERVICE_PREFIX =
-    /^(GITHUB|GITLAB|CIRCLE|TRAVIS|BUILDKITE|APPVEYOR|TEAMCITY|JENKINS|DRONE|NETLIFY|VERCEL|SAIL|WOODPECKER|BITBUCKET|BITRISE|BAMBOO|AZURE|CODEBUILD|CODEFRESH|CODESHIP|CIRRUS|SCRUTINIZER|SEMAPHORE|SHIPYABLE|WERCKER|VELA|BUDDY|JETBRAINS)_/;
-  const env: Record<string, string> = {};
-  for (const [key, value] of Object.entries(process.env)) {
-    if (value !== undefined && key !== 'CI' && key !== 'CI_NAME' && key !== 'CIRCLECI' && !CI_SERVICE_PREFIX.test(key)) {
-      env[key] = value;
-    }
-  }
-  env.CI = 'true';
-  return env;
-}
 
 const chainPackages: readonly FixturePackage[] = [
   { name: '@fixture/a', version: '1.0.0' },
