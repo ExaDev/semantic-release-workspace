@@ -1,3 +1,10 @@
+# [3.1.0](https://github.com/ExaDev/semantic-release-workspace/compare/v3.0.3...v3.1.0) (2026-09-20)
+
+
+### Features
+
+* **cli:** accept tagFormat as a --tag-format flag and a config file key ([2ad97f4](https://github.com/ExaDev/semantic-release-workspace/commit/2ad97f49f8135b4e356dd72085d7a204811a05be))
+
 ## [3.0.3](https://github.com/ExaDev/semantic-release-workspace/compare/v3.0.2...v3.0.3) (2026-09-20)
 
 ## [3.0.2](https://github.com/ExaDev/semantic-release-workspace/compare/v3.0.1...v3.0.2) (2026-09-20)
