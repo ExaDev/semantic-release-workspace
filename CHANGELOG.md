@@ -1,3 +1,10 @@
+## [3.0.1](https://github.com/ExaDev/semantic-release-workspace/compare/v3.0.0...v3.0.1) (2026-09-20)
+
+
+### Bug Fixes
+
+* retry a single-commit release whose push lost a race to the branch ([9b60227](https://github.com/ExaDev/semantic-release-workspace/commit/9b602271167671df9833e6a26b6c9a77855dfa8b))
+
 # [3.0.0](https://github.com/ExaDev/semantic-release-workspace/compare/v2.2.0...v3.0.0) (2026-09-19)
 
 
