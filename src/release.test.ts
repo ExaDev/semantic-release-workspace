@@ -11,6 +11,7 @@ import { writeDependencyRange } from './manifest';
 import { type PublishPluginSpec } from './plugins';
 import { createRecordingPlugin, readRecordingPluginCalls } from './recording-plugin-fixture';
 import { releaseWorkspace } from './release';
+import { releaseEnv } from './release-env-fixture';
 import { TestTimeoutMs } from './test-timeouts';
 
 /**
@@ -20,22 +21,6 @@ const FIXTURE_PLUGINS: readonly PublishPluginSpec[] = [
   ['@semantic-release/npm', { npmPublish: false }],
   ['@semantic-release/git', { assets: ['package.json'], message: 'chore(release): ${nextRelease.gitTag} [skip ci]' }],
 ];
-
-/**
- * A deterministic environment for the per-package semantic-release runs: every recognisable CI service variable is stripped so env-ci cannot mistake the test runner's own CI (GitHub Actions runs these very tests) for the release run's CI, then CI=true alone is set so semantic-release runs in real mode (env-ci's fallback reads the branch straight from the local git repository).
- */
-function releaseEnv(): NodeJS.ProcessEnv {
-  const CI_SERVICE_PREFIX =
-    /^(GITHUB|GITLAB|CIRCLE|TRAVIS|BUILDKITE|APPVEYOR|TEAMCITY|JENKINS|DRONE|NETLIFY|VERCEL|SAIL|WOODPECKER|BITBUCKET|BITRISE|BAMBOO|AZURE|CODEBUILD|CODEFRESH|CODESHIP|CIRRUS|SCRUTINIZER|SEMAPHORE|SHIPYABLE|WERCKER|VELA|BUDDY|JETBRAINS)_/;
-  const env: Record<string, string> = {};
-  for (const [key, value] of Object.entries(process.env)) {
-    if (value !== undefined && key !== 'CI' && key !== 'CI_NAME' && key !== 'CIRCLECI' && !CI_SERVICE_PREFIX.test(key)) {
-      env[key] = value;
-    }
-  }
-  env.CI = 'true';
-  return env;
-}
 
 const chainPackages: readonly FixturePackage[] = [
   { name: '@fixture/a', version: '1.0.0' },

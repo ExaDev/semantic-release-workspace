@@ -8,21 +8,8 @@ import { writeDependencyRange } from './manifest';
 import { type PublishPluginSpec } from './plugins';
 import { readRecordingPluginCalls, writeRecordingPlugin } from './recording-plugin-fixture';
 import { releaseWorkspace } from './release';
+import { releaseEnv } from './release-env-fixture';
 import { TestTimeoutMs } from './test-timeouts';
-
-/** Matches release.test.ts's own releaseEnv -- see that file for why every recognisable CI service variable is stripped before forcing CI=true. */
-function releaseEnv(): NodeJS.ProcessEnv {
-  const CI_SERVICE_PREFIX =
-    /^(GITHUB|GITLAB|CIRCLE|TRAVIS|BUILDKITE|APPVEYOR|TEAMCITY|JENKINS|DRONE|NETLIFY|VERCEL|SAIL|WOODPECKER|BITBUCKET|BITRISE|BAMBOO|AZURE|CODEBUILD|CODEFRESH|CODESHIP|CIRRUS|SCRUTINIZER|SEMAPHORE|SHIPYABLE|WERCKER|VELA|BUDDY|JETBRAINS)_/;
-  const env: Record<string, string> = {};
-  for (const [key, value] of Object.entries(process.env)) {
-    if (value !== undefined && key !== 'CI' && key !== 'CI_NAME' && key !== 'CIRCLECI' && !CI_SERVICE_PREFIX.test(key)) {
-      env[key] = value;
-    }
-  }
-  env.CI = 'true';
-  return env;
-}
 
 const chainPackages: readonly FixturePackage[] = [
   { name: '@fixture/a', version: '1.0.0' },
