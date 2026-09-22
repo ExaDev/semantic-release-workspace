@@ -168,7 +168,7 @@ importers:
     dependencies:
       '@exadev/release-gate':
         specifier: ^1.0.0
-        version: 1.0.0(supports-color@7.2.0)(typescript@6.0.3)
+        version: 1.0.1(supports-color@7.2.0)(typescript@6.0.3)
       commander:
         specifier: ^15.0.0
         version: 15.0.0
@@ -484,8 +484,8 @@ packages:
       eslint-plugin-react-hooks:
         optional: true
 
-  '@exadev/release-gate@1.0.0':
-    resolution: {integrity: sha512-ud9Tk0xVq4xgBgjs1R5uvwAkDCmnaApslKzoklGm2Y+wlCJsAO50qGUi0QQ5lTpW0DWinCbne6QZXFVeJ+qYsA==}
+  '@exadev/release-gate@1.0.1':
+    resolution: {integrity: sha512-VKU6qZlvl6C+xOLC12mYvv1ygcLm4Gt28rcd2K20fMJB4jz/2IeK5Nn+Ivk4a4xv7TmzvoJCmHUfo7nmwnrVYw==}
     engines: {node: '>=20'}
 
   '@humanfs/core@0.19.2':
@@ -3274,7 +3274,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@exadev/release-gate@1.0.0(supports-color@7.2.0)(typescript@6.0.3)':
+  '@exadev/release-gate@1.0.1(supports-color@7.2.0)(typescript@6.0.3)':
     dependencies:
       env-ci: 11.2.0
       semantic-release: 25.0.9(supports-color@7.2.0)(typescript@6.0.3)
