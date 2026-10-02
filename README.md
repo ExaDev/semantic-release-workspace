@@ -1,6 +1,6 @@
 # semantic-release-workspace
 
-[![GitHub](https://img.shields.io/badge/GitHub-181717?logo=github&logoColor=white)](https://github.com/ExaDev/semantic-release-workspace) [![npm](https://img.shields.io/badge/npm-CB3833?logo=npm&logoColor=white)](https://www.npmjs.com/package/@exadev/semantic-release-workspace) [![CI](https://img.shields.io/github/actions/workflow/status/ExaDev/semantic-release-workspace/ci.yml?branch=main)](https://github.com/ExaDev/semantic-release-workspace/actions)
+[![GitHub](https://img.shields.io/badge/GitHub-181717?logo=github&logoColor=white)](https://github.com/ExaDev/semantic-release-workspace) [![npm](https://img.shields.io/badge/npm-CB3837?logo=npm&logoColor=white)](https://www.npmjs.com/package/@exadev/semantic-release-workspace) [![Release](https://img.shields.io/github/v/release/ExaDev/semantic-release-workspace)](https://github.com/ExaDev/semantic-release-workspace/releases/latest) [![CI](https://img.shields.io/github/actions/workflow/status/ExaDev/semantic-release-workspace/ci.yml?branch=main)](https://github.com/ExaDev/semantic-release-workspace/actions)
 
 > Independent per-package semantic-release orchestration for pnpm workspaces, without lockstep versioning.
 
