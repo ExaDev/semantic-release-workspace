@@ -4,6 +4,8 @@
 
 > Independent per-package semantic-release orchestration for pnpm workspaces, without lockstep versioning.
 
+[![npm downloads chart, log scale](https://shieldcn.dev/chart/npm/@exadev/semantic-release-workspace.svg?bg=transparent&logo=false&yScale=log)](https://www.npmjs.com/package/@exadev/semantic-release-workspace)
+
 A pnpm workspace publishing every package under one shared version number (lockstep) forces an unrelated package to release whenever any sibling changes. This tool runs semantic-release independently per package, driven by each package's own commit history and its own dependencies within the workspace, so a change to one package never forces a version bump in another — while a package whose dependencies genuinely changed still releases, so no published manifest ever disagrees with the repository.
 
 Built for the [documents.js ecosystem's monorepo consolidation](https://github.com/ExaDev/documents.js/issues/664) and reusable from any pnpm workspace: it discovers packages from `pnpm-workspace.yaml` and their manifests, with nothing hardcoded about any particular ecosystem layout.
