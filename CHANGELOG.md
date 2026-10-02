@@ -1,3 +1,5 @@
+## [3.1.20](https://github.com/ExaDev/semantic-release-workspace/compare/v3.1.19...v3.1.20) (2026-10-02)
+
 ## [3.1.19](https://github.com/ExaDev/semantic-release-workspace/compare/v3.1.18...v3.1.19) (2026-10-02)
 
 ## [3.1.18](https://github.com/ExaDev/semantic-release-workspace/compare/v3.1.17...v3.1.18) (2026-10-02)
