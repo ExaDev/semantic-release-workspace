@@ -255,7 +255,7 @@ importers:
         specifier: ^0.23.0
         version: 0.23.0(@arethetypeswrong/core@0.18.5)(publint@0.3.24)(typescript@6.0.3)
       turbo:
-        specifier: ^2.10.11
+        specifier: ^2.11.5
         version: 2.11.5
       typescript:
         specifier: ^6.0.3
