@@ -1,7 +1,8 @@
 import { DEFAULT_TAG_FORMAT, formatTagForPackage, validateTagFormat } from './tag-format';
 import { resolve } from 'node:path';
-import type { BranchSpec, Options } from 'semantic-release';
+import type { BranchSpec, Options, ReleaseType } from 'semantic-release';
 import { detachRelease, resumeRelease, type ReleaseGateState } from '@exadev/release-gate';
+import { type BundledDependencies, resolveBundledDependencies } from './bundling';
 import { WorkspaceReleaseError } from './errors';
 import { sanitizeGitEnv } from './git';
 import { buildDependencyGraph, mustGet, orderedPackages, topologicalOrder, validateDependencyRanges } from './graph';
@@ -51,21 +52,23 @@ export async function detachWorkspaceRelease(options: ReleaseWorkspaceOptions): 
     workspace.root,
     { requireGitPlugin: !dryRun },
   );
+  const bundled = resolveBundledDependencies(graph, options.bundlingPackages);
   const analyzeCommitsConfig = options.analyzeCommits ?? {};
   const generateNotesConfig = options.generateNotes ?? {};
 
   const entries = await runReleaseLoop(graph, order, workspace, dryRun, log, async (pkg, bumpsForThisPackage) => {
-    const state = await runPackageDetach(pkg, {
+    const { state, releaseType } = await runPackageDetach(pkg, {
       publishPlugins: mustGet(publishPlugins, pkg.name, 'publish plugins'),
       analyzeCommitsConfig,
       generateNotesConfig,
       bumpsForThisPackage,
+      bundled: mustGet(bundled, pkg.name, 'bundled dependencies'),
       tagFormat: validateTagFormat(options.tagFormat ?? DEFAULT_TAG_FORMAT),
       dryRun,
       env,
       branches: options.branches,
     });
-    return { released: state !== null, version: state?.nextRelease.version, result: state };
+    return { released: state !== null, version: state?.nextRelease.version, releaseType, result: state };
   });
 
   const packages: PackageReleaseOutcome[] = entries.map((entry) =>
@@ -99,17 +102,19 @@ async function runPackageDetach(
     readonly analyzeCommitsConfig: Record<string, unknown>;
     readonly generateNotesConfig: Record<string, unknown>;
     readonly bumpsForThisPackage: readonly AppliedDependencyBump[];
-  readonly tagFormat: string;
+    readonly bundled: BundledDependencies;
+    readonly tagFormat: string;
     readonly dryRun: boolean;
     readonly env: NodeJS.ProcessEnv | undefined;
     readonly branches: readonly BranchSpec[] | undefined;
   },
-): Promise<ReleaseGateState | null> {
+): Promise<{ readonly state: ReleaseGateState | null; readonly releaseType: ReleaseType | undefined }> {
   const scoped = createScopedPlugins({
     pkg,
     analyzeCommitsConfig: options.analyzeCommitsConfig,
     generateNotesConfig: options.generateNotesConfig,
     bumps: { bumpsFor: () => options.bumpsForThisPackage },
+    bundled: options.bundled,
   });
 
   const cliOptions: Options = {
@@ -126,11 +131,12 @@ async function runPackageDetach(
   }
 
   try {
-    return await detachRelease(cliOptions, {
+    const state = await detachRelease(cliOptions, {
       cwd: pkg.directory,
       // A fresh copy per package, matching runPackageRelease's own env handling in release.ts -- see that function's comment for why.
       env: { ...options.env },
     });
+    return { state, releaseType: state === null ? undefined : scoped.shippedReleaseType(state.nextRelease.type) };
   } catch (cause) {
     throw new WorkspaceReleaseError(`Detaching ${pkg.name} failed: ${cause instanceof Error ? cause.message : String(cause)}`);
   }

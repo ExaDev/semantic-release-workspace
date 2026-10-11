@@ -102,6 +102,7 @@ describe('createScopedPlugins', () => {
         analyzeCommitsConfig: {},
         generateNotesConfig: {},
         bumps: { bumpsFor: () => [] },
+        bundled: { releaseTypeFrom: new Set(), carried: new Set() },
       });
       const result = await scoped.analyzeCommits({}, fakeFirstReleaseContext(directory));
       expect(result).toBe(false);

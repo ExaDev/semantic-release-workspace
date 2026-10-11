@@ -2,11 +2,13 @@ import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
 import { analyzeCommits } from '@semantic-release/commit-analyzer';
 import { generateNotes } from '@semantic-release/release-notes-generator';
-import type { AnalyzeCommitsContext, Commit, GenerateNotesContext } from 'semantic-release';
+import type { AnalyzeCommitsContext, Commit, GenerateNotesContext, ReleaseType } from 'semantic-release';
+import { type BundledDependencies } from './bundling';
 import { packageName } from './package-name';
 import { parseDependencyBumpTrailer } from './dependency-bump-commit';
 import { ReleaseConfigurationError } from './errors';
 import { changedPathsSince } from './git';
+import { highestReleaseType, isReleaseType, raiseReleaseType } from './release-type';
 import type { WorkspacePackage } from './workspace';
 
 /**
@@ -18,6 +20,10 @@ export interface DependencyBump {
   /** The range as it now stands in the dependent's manifest -- the new concrete range for `rewritten`, the untouched `workspace:` range for `resolved-at-publish`. */
   readonly range: string;
   readonly kind: 'rewritten' | 'resolved-at-publish';
+  /**
+   * The highest release type in the code the dependency ships as of this release: its own release type, raised by the shipped release type of every sibling it bundles (see `BundledDependencies`). A dependent that bundles the dependency takes at least this release type; any other dependent ignores it and keeps the forced patch. `undefined` only for a bump recovered from a commit written before its trailer recorded the type, which counts as a patch.
+   */
+  readonly releaseType: ReleaseType | undefined;
 }
 
 /** What the scoped plugins need to know about bumps recorded so far in the run, for the package they are about to analyse. */
@@ -68,6 +74,10 @@ const STEP_PLUGINS_THE_ORCHESTRATOR_OWNS: ReadonlySet<string> = new Set(['@seman
 export interface ScopedPlugins {
   readonly analyzeCommits: (pluginConfig: Record<string, unknown>, context: AnalyzeCommitsContext & { cwd: string }) => Promise<string | false | undefined>;
   readonly generateNotes: (pluginConfig: Record<string, unknown>, context: GenerateNotesContext & { cwd: string }) => Promise<string | false | undefined>;
+  /**
+   * The release type the package's released code carries to whatever bundles it: the highest of `releaseType` (the type the package itself released as) and the release types of the bumps it carries (`BundledDependencies.carried`) from the most recent `analyzeCommits` call. A carried bump with no recorded type counts as a patch. `releaseType` is the type semantic-release released the package as.
+   */
+  readonly shippedReleaseType: (releaseType: ReleaseType) => ReleaseType;
 }
 
 /**
@@ -75,18 +85,22 @@ export interface ScopedPlugins {
  *
  * Both apply the same path scoping before delegating to the real `@semantic-release/commit-analyzer` and `@semantic-release/release-notes-generator`: the commit list semantic-release already fetched for the release range is filtered down to commits whose `git log --name-only` file list intersects the package's own directory, and only the filtered list reaches the standard plugin. Conventional-commit parsing and changelog formatting stay entirely inside the standard plugins.
  *
- * The `analyzeCommits` wrapper carries one addition beyond filtering: when the standard analyzer finds no releasable commits but a workspace dependency range of the package's has changed, it returns 'patch' anyway. A dependent whose only change is a dependency bump still needs a release for that range to reach the registry. "Has changed" is read from two sources, merged: bumps recorded in memory earlier in the current run (`scope.bumps`), and bumps recorded in the package's own filtered commit history via the trailer `dependency-bump-commit.ts` writes and reads -- the latter is what lets a run that starts after a previous run already committed and pushed the bump (a crash recovery, or simply a later run) reach the same decision, rather than depending on state that existed only inside the process that made the commit.
+ * The `analyzeCommits` wrapper carries two additions beyond filtering. When the standard analyzer finds no releasable commits but a workspace dependency range of the package's has changed, it returns 'patch' anyway: a dependent whose only change is a dependency bump still needs a release for that range to reach the registry. And when a bumped dependency is one the package bundles (`scope.bundled.releaseTypeFrom`), the package's release type is raised to at least that dependency's shipped release type, whether or not the package has releasable commits of its own, because the dependency's change reaches consumers only inside this package. "Has changed" is read from two sources, merged: bumps recorded in memory earlier in the current run (`scope.bumps`), and bumps recorded in the package's own filtered commit history via the trailer `dependency-bump-commit.ts` writes and reads -- the latter is what lets a run that starts after a previous run already committed and pushed the bump (a crash recovery, or simply a later run) reach the same decision, rather than depending on state that existed only inside the process that made the commit.
  */
 export function createScopedPlugins(scope: {
   readonly pkg: WorkspacePackage;
   readonly analyzeCommitsConfig: Record<string, unknown>;
   readonly generateNotesConfig: Record<string, unknown>;
   readonly bumps: DependencyBumpSource;
+  /** Which of the package's workspace dependencies it bundles; see `resolveBundledDependencies`. */
+  readonly bundled: BundledDependencies;
   /** Called with the path-filtered commit list every time this package's commits are resolved (from either step, whichever runs first). Optional: `commitStrategy: 'single'` uses it to capture the same filtered list `success()`'s GitHub plugin step needs later, without recomputing `changedPathsSince`/`filterCommitsToDirectory` itself from the outside. */
   readonly onCommitsResolved?: (commits: readonly Commit[]) => void;
 }): ScopedPlugins {
   // One `git log --name-only` pass per release range, shared between the analyzeCommits and generateNotes steps (semantic-release calls both with the same lastRelease base; notes regeneration after a prepare-plugin commit reuses the cached range because the analysis list itself does not change).
   let cached: { readonly from: string | undefined; readonly paths: Promise<Map<string, ReadonlySet<string>>> } | undefined;
+  // The highest release type among the carried bumps the most recent analysis saw, read back by `shippedReleaseType` once semantic-release has decided the package's own type.
+  let carriedReleaseType: ReleaseType | undefined;
 
   async function commitsForPackage(context: AnalyzeCommitsContext & { cwd: string }): Promise<readonly Commit[]> {
     // A lastRelease with no gitHead means semantic-release fetched the package's whole history, so the path map is built over the same unbounded range.
@@ -105,13 +119,29 @@ export function createScopedPlugins(scope: {
   return {
     async analyzeCommits(_pluginConfig, context) {
       const commits = await commitsForPackage(context);
-      const type = await analyzeCommits(scope.analyzeCommitsConfig, { ...context, commits });
-      if (typeof type === 'string') {
+      const analysed = await analyzeCommits(scope.analyzeCommitsConfig, { ...context, commits });
+      if (typeof analysed === 'string' && !isReleaseType(analysed)) {
+        throw new ReleaseConfigurationError(`@semantic-release/commit-analyzer returned "${analysed}" for ${scope.pkg.name}, which is not a semantic-release release type.`);
+      }
+      const own = typeof analysed === 'string' ? analysed : undefined;
+      const bumps = mergeDependencyBumps(scope.bumps.bumpsFor(scope.pkg.name), commits);
+      carriedReleaseType = releaseTypeOfBumps(bumps.filter((bump) => scope.bundled.carried.has(bump.dependency)));
+      const bundledBumps = bumps.filter((bump) => scope.bundled.releaseTypeFrom.has(bump.dependency));
+      const fromBundled = releaseTypeOfBumps(bundledBumps);
+
+      if (own !== undefined) {
+        const type = raiseReleaseType(own, fromBundled);
+        if (type !== own) {
+          context.logger.log(`${scope.pkg.name} bundles ${describeBundledBumps(bundledBumps)}; raising its ${own} release to ${type}.`);
+        }
         return type;
       }
-      const bumps = mergeDependencyBumps(scope.bumps.bumpsFor(scope.pkg.name), commits);
       if (bumps.length === 0) {
         return false;
+      }
+      if (fromBundled !== undefined) {
+        context.logger.log(`No releasable commits under ${scope.pkg.relativeDirectory}, but it bundles ${describeBundledBumps(bundledBumps)}; releasing it as ${fromBundled}.`);
+        return fromBundled;
       }
       context.logger.log(
         `No releasable commits under ${scope.pkg.relativeDirectory}, but ${bumps.length === 1 ? 'a workspace dependency range changed' : `${String(bumps.length)} workspace dependency ranges changed`}; forcing a patch release.`,
@@ -129,7 +159,20 @@ export function createScopedPlugins(scope: {
       const section = ['### Dependencies', '', ...bumps.map((bump) => describeDependencyBump(bump))].join('\n');
       return typeof notes === 'string' ? `${notes}\n\n${section}` : section;
     },
+
+    shippedReleaseType(releaseType) {
+      return raiseReleaseType(releaseType, carriedReleaseType);
+    },
   };
+}
+
+/** The highest release type among `bumps`, or `undefined` when there are none. A bump with no recorded type counts as the patch it always forced. */
+function releaseTypeOfBumps(bumps: readonly DependencyBump[]): ReleaseType | undefined {
+  return highestReleaseType(bumps.map((bump) => bump.releaseType ?? 'patch'));
+}
+
+function describeBundledBumps(bumps: readonly DependencyBump[]): string {
+  return bumps.map((bump) => `${bump.dependency} (released ${bump.version}, ${bump.releaseType ?? 'patch'})`).join(', ');
 }
 
 /**

@@ -327,7 +327,7 @@ describe('releaseWorkspace against a real git workspace', () => {
 
       // ...and `b`'s manifest already bumped, committed, and pushed -- the exact commit `bumpDependents` makes -- with no in-memory record of it anywhere, because this is a brand-new process that never ran the first half of this release.
       await writeDependencyRange(join(fixture.root, 'packages/b/package.json'), 'dependencies', '@fixture/a', '^1.1.0');
-      const message = formatDependencyBumpMessage({ dependency: '@fixture/a', version: '1.1.0', range: '^1.1.0', dependent: '@fixture/b' });
+      const message = formatDependencyBumpMessage({ dependency: '@fixture/a', version: '1.1.0', range: '^1.1.0', releaseType: 'minor', dependent: '@fixture/b' });
       await git(['add', '--', 'packages/b/package.json'], { cwd: fixture.root });
       await git(['commit', '-m', message], { cwd: fixture.root });
       await git(['push', 'origin', 'main', '--tags'], { cwd: fixture.root });
