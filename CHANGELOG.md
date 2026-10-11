@@ -1,3 +1,18 @@
+# [3.2.0](https://github.com/ExaDev/semantic-release-workspace/compare/v3.1.29...v3.2.0) (2026-10-11)
+
+
+### Bug Fixes
+
+* **plugins:** keep createScopedPlugins' bundled scope and bump type optional ([91281f6](https://github.com/ExaDev/semantic-release-workspace/commit/91281f636cacefab916ef87f448ae8345d24b6c9))
+
+
+### Features
+
+* **cli:** accept bundlingPackages from a flag and the config file ([3114b0c](https://github.com/ExaDev/semantic-release-workspace/commit/3114b0c017b07c447edfe4a5a546bfccbe2b6dea))
+* rank semantic-release release types as the commit analyzer does ([53a0708](https://github.com/ExaDev/semantic-release-workspace/commit/53a0708532785ac8068e28b63af50d386197388a))
+* release a bundling package as its bundled siblings' release type ([8bf1e88](https://github.com/ExaDev/semantic-release-workspace/commit/8bf1e88357941c270026b7a33b00bc534fc82e38)), closes [#80](https://github.com/ExaDev/semantic-release-workspace/issues/80)
+* work out which workspace dependencies each package bundles ([d4fb811](https://github.com/ExaDev/semantic-release-workspace/commit/d4fb811c943a712ddbd1ab57b8c7bf0cff5830f9))
+
 ## [3.1.29](https://github.com/ExaDev/semantic-release-workspace/compare/v3.1.28...v3.1.29) (2026-10-09)
 
 ## [3.1.28](https://github.com/ExaDev/semantic-release-workspace/compare/v3.1.27...v3.1.28) (2026-10-09)
