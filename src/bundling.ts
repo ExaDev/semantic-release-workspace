@@ -42,7 +42,7 @@ export function resolveBundledDependencies(graph: DependencyGraph, bundlingPacka
 
   const resolved = new Map<string, BundledDependencies>();
   for (const [name, pkg] of graph.packages) {
-    const edges = graph.dependencies.get(name) ?? [];
+    const edges = mustGet(graph.dependencies, name, 'dependency edges');
     const releaseTypeFrom = new Set(edges.filter((edge) => bundling.has(name) && edge.field === 'devDependencies').map((edge) => edge.dependency));
     const carried = new Set([...releaseTypeFrom, ...edges.filter((edge) => pkg.private && isPrivateRuntimeEdge(edge, graph)).map((edge) => edge.dependency)]);
     resolved.set(name, { releaseTypeFrom, carried });
