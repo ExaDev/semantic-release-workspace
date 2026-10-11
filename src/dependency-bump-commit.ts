@@ -1,3 +1,6 @@
+import type { ReleaseType } from 'semantic-release';
+import { isReleaseType } from './release-type';
+
 /**
  * The commit message format for a cross-package dependency-range bump, shared between the code that writes it (`bumpDependents` in `release.ts`) and the code that reads it back (`createScopedPlugins` in `plugins.ts`).
  *
@@ -7,22 +10,30 @@
 const TRAILER_DEPENDENCY = 'Bumped-Workspace-Dependency';
 const TRAILER_VERSION = 'Bumped-Workspace-Dependency-Version';
 const TRAILER_RANGE = 'Bumped-Workspace-Dependency-Range';
+const TRAILER_RELEASE_TYPE = 'Bumped-Workspace-Dependency-Release-Type';
 
 export interface DependencyBumpCommitInfo {
   readonly dependency: string;
   readonly version: string;
   readonly range: string;
+  /** The dependency's shipped release type (see `DependencyBump.releaseType`). `undefined` for a bump commit written before the trailer recorded it, which a reader treats as the forced patch such a commit always meant. */
+  readonly releaseType: ReleaseType | undefined;
 }
 
 /** Builds the full commit message (subject and trailer) for one dependency-range bump. */
-export function formatDependencyBumpMessage(info: DependencyBumpCommitInfo & { readonly dependent: string }): string {
+export function formatDependencyBumpMessage(info: DependencyBumpCommitInfo & { readonly releaseType: ReleaseType; readonly dependent: string }): string {
   const subject = `chore(deps): bump ${info.dependency} to ${info.range} in ${info.dependent} [skip ci]`;
-  const trailer = [`${TRAILER_DEPENDENCY}: ${info.dependency}`, `${TRAILER_VERSION}: ${info.version}`, `${TRAILER_RANGE}: ${info.range}`].join('\n');
+  const trailer = [
+    `${TRAILER_DEPENDENCY}: ${info.dependency}`,
+    `${TRAILER_VERSION}: ${info.version}`,
+    `${TRAILER_RANGE}: ${info.range}`,
+    `${TRAILER_RELEASE_TYPE}: ${info.releaseType}`,
+  ].join('\n');
   return `${subject}\n\n${trailer}`;
 }
 
 /**
- * Recovers the dependency bump a `formatDependencyBumpMessage` commit recorded, from its full git message (subject and body), or `undefined` if the message carries no such trailer. All three lines must be present for the commit to be treated as a bump commit at all -- a message missing even one is left alone rather than partially trusted.
+ * Recovers the dependency bump a `formatDependencyBumpMessage` commit recorded, from its full git message (subject and body), or `undefined` if the message carries no such trailer. The dependency, version and range lines must all be present for the commit to be treated as a bump commit at all -- a message missing even one is left alone rather than partially trusted. The release type line is optional, since bump commits written before it existed lack it; when it is absent or names no release type, `releaseType` is `undefined`.
  */
 export function parseDependencyBumpTrailer(message: string): DependencyBumpCommitInfo | undefined {
   const dependency = matchTrailerLine(message, TRAILER_DEPENDENCY);
@@ -31,7 +42,8 @@ export function parseDependencyBumpTrailer(message: string): DependencyBumpCommi
   if (dependency === undefined || version === undefined || range === undefined) {
     return undefined;
   }
-  return { dependency, version, range };
+  const releaseType = matchTrailerLine(message, TRAILER_RELEASE_TYPE);
+  return { dependency, version, range, releaseType: isReleaseType(releaseType) ? releaseType : undefined };
 }
 
 function matchTrailerLine(message: string, key: string): string | undefined {

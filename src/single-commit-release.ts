@@ -18,6 +18,7 @@ import {
   sanitizeGitEnv,
   workingTreeChanges,
 } from './git';
+import { type BundledDependencies, resolveBundledDependencies } from './bundling';
 import { buildDependencyGraph, mustGet, orderedPackages, topologicalOrder, validateDependencyRanges, type DependencyGraph } from './graph';
 import { writeDependencyRange } from './manifest';
 import { packageName } from './package-name';
@@ -108,6 +109,7 @@ async function attemptSingleCommitRelease(options: ReleaseWorkspaceOptions): Pro
     workspace.root,
     { requireGitPlugin: false, forbidGitPlugin: true },
   );
+  const bundled = resolveBundledDependencies(graph, options.bundlingPackages);
   const analyzeCommitsConfig = options.analyzeCommits ?? {};
   const generateNotesConfig = options.generateNotes ?? {};
   const tagFormat = validateTagFormat(options.tagFormat ?? DEFAULT_TAG_FORMAT);
@@ -125,11 +127,12 @@ async function attemptSingleCommitRelease(options: ReleaseWorkspaceOptions): Pro
     pendingBumps.delete(name);
 
     const nextRelease = await analysePackage(pkg, {
-    tagFormat,
+      tagFormat,
       resolvedPlugins: mustGet(resolvedPlugins, name, 'publish plugins'),
       analyzeCommitsConfig,
       generateNotesConfig,
       bumpsForThisPackage,
+      bundled: mustGet(bundled, name, 'bundled dependencies'),
       env,
       branches: options.branches,
       onCommitsResolved: (commits) => {
@@ -162,7 +165,7 @@ async function attemptSingleCommitRelease(options: ReleaseWorkspaceOptions): Pro
     log(`${name}: would release ${nextRelease.gitTag}`);
     planned.push({ pkg, type: nextRelease.type, version: nextRelease.version, gitTag: nextRelease.gitTag, notes: nextRelease.notes, bumps: bumpsForThisPackage });
 
-    for (const bump of planDependentBumps(pkg, nextRelease.version, graph)) {
+    for (const bump of planDependentBumps(pkg, { version: nextRelease.version, releaseType: nextRelease.shippedReleaseType }, graph)) {
       const forDependent = pendingBumps.get(bump.dependent) ?? [];
       forDependent.push(bump);
       pendingBumps.set(bump.dependent, forDependent);
@@ -293,6 +296,8 @@ interface PlannedPackageRelease {
 
 interface AnalysedNextRelease {
   readonly type: ReleaseType;
+  /** See `ScopedPlugins.shippedReleaseType`: what this release carries to the dependents that bundle it. */
+  readonly shippedReleaseType: ReleaseType;
   readonly version: string;
   readonly gitTag: string;
   readonly notes: string;
@@ -307,6 +312,7 @@ async function analysePackage(pkg: WorkspacePackage, options: {
   readonly analyzeCommitsConfig: Record<string, unknown>;
   readonly generateNotesConfig: Record<string, unknown>;
   readonly bumpsForThisPackage: readonly AppliedDependencyBump[];
+  readonly bundled: BundledDependencies;
   readonly env: NodeJS.ProcessEnv | undefined;
   readonly branches: readonly BranchSpec[] | undefined;
   readonly onCommitsResolved: (commits: readonly Commit[]) => void;
@@ -317,6 +323,7 @@ async function analysePackage(pkg: WorkspacePackage, options: {
     analyzeCommitsConfig: options.analyzeCommitsConfig,
     generateNotesConfig: options.generateNotesConfig,
     bumps: { bumpsFor: () => options.bumpsForThisPackage },
+    bundled: options.bundled,
     onCommitsResolved: options.onCommitsResolved,
   });
 
@@ -344,11 +351,18 @@ async function analysePackage(pkg: WorkspacePackage, options: {
   if (result.nextRelease.notes === undefined) {
     throw new ReleaseConfigurationError(`Internal error: ${pkg.name} released with no notes computed.`);
   }
-  return { type: result.nextRelease.type, version: result.nextRelease.version, gitTag: result.nextRelease.gitTag, notes: result.nextRelease.notes };
+  return {
+    type: result.nextRelease.type,
+    shippedReleaseType: scoped.shippedReleaseType(result.nextRelease.type),
+    version: result.nextRelease.version,
+    gitTag: result.nextRelease.gitTag,
+    notes: result.nextRelease.notes,
+  };
 }
 
 /** Pure classification of what a released package's version does to each dependent's declared range -- the same logic `bumpDependents` in `release.ts` applies, minus the file write/commit/push: `commitStrategy: 'single'` defers every write to phase 3, applying the same classification once analysis has finished for the whole run. */
-function planDependentBumps(released: WorkspacePackage, version: string, graph: DependencyGraph): readonly AppliedDependencyBump[] {
+function planDependentBumps(released: WorkspacePackage, release: { readonly version: string; readonly releaseType: ReleaseType }, graph: DependencyGraph): readonly AppliedDependencyBump[] {
+  const { version, releaseType } = release;
   const applied: AppliedDependencyBump[] = [];
   const dependents = graph.dependents.get(released.name);
   if (dependents === undefined) {
@@ -366,6 +380,7 @@ function planDependentBumps(released: WorkspacePackage, version: string, graph: 
       version,
       range: update.kind === 'rewritten' ? update.range : edge.range,
       kind: update.kind,
+      releaseType,
     });
   }
   return applied;

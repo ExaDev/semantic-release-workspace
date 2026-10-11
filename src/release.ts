@@ -1,6 +1,7 @@
 import { resolve } from 'node:path';
 import semanticRelease from 'semantic-release';
-import type { BranchSpec, Options, Result } from 'semantic-release';
+import type { BranchSpec, Options, ReleaseType, Result } from 'semantic-release';
+import { type BundledDependencies, resolveBundledDependencies } from './bundling';
 import { formatDependencyBumpMessage } from './dependency-bump-commit';
 import { releasePackageAcrossBranchMoves, type BranchTracker } from './branch-integration';
 import { ReleaseConfigurationError, WorkspaceReleaseError, WorkspaceStateError } from './errors';
@@ -73,6 +74,12 @@ export interface ReleaseWorkspaceOptions {
    * Raise it for a busier branch or a slower workspace; the cost of a higher bound is only paid when attempts are actually being lost.
    */
   readonly pushAttempts?: number;
+  /**
+   * Names of public packages whose build bundles every workspace sibling they list in `devDependencies`, so consumers never install those siblings from the registry. When such a sibling releases, the bundling package releases as at least the sibling's release type (a `feat` in a bundled package makes the bundling package a minor, a breaking change a major) instead of the patch a dependency bump otherwise forces; with releasable commits of its own, it releases as the higher of the two. A private sibling's release type reaches the bundling package through private packages that depend on it at run time, too, so a sibling bundled only indirectly still counts. Every other package, and every `dependencies`, `peerDependencies` or `optionalDependencies` edge, keeps the forced patch, and private packages' own versions and tags are unchanged.
+   *
+   * Off unless named, because a workspace `devDependencies` entry is not bundled in general: a public package's test helper or lint config is a workspace devDependency whose changes never reach its consumers. A name that is not a package in the workspace, or is a private package, is rejected. Applies under every `commitStrategy` and to `gatePublish`. See `resolveBundledDependencies`.
+   */
+  readonly bundlingPackages?: readonly string[];
 }
 
 /** See `ReleaseWorkspaceOptions.pushAttempts` for how this number is derived. */
@@ -83,6 +90,8 @@ export interface AppliedDependencyBump extends DependencyBump {
   readonly dependent: string;
   /** Which manifest field held the range that was rewritten. */
   readonly field: DependencyField;
+  /** Always known for a bump made in this run: see `DependencyBump.releaseType`. */
+  readonly releaseType: ReleaseType;
 }
 
 // `released` is the discriminant: `version`/`gitTag`/`type` are only ever populated together, whenever a package actually released, and never independently -- every producer of this type sets all three or none. Modelling that as two required-together fields tied to a boolean, rather than three independently-optional ones, lets a consumer that has already checked `released` use `gitTag`/`type` without a further null check.
@@ -141,22 +150,24 @@ export async function releaseWorkspace(options: ReleaseWorkspaceOptions = {}): P
     workspace.root,
     { requireGitPlugin: !dryRun },
   );
+  const bundled = resolveBundledDependencies(graph, options.bundlingPackages);
   const analyzeCommitsConfig = options.analyzeCommits ?? {};
   const generateNotesConfig = options.generateNotes ?? {};
 
   const entries = await runReleaseLoop(graph, order, workspace, dryRun, log, async (pkg, bumpsForThisPackage) => {
-    const result = await runPackageRelease(pkg, {
+    const { result, releaseType } = await runPackageRelease(pkg, {
       tagFormat: validateTagFormat(options.tagFormat ?? DEFAULT_TAG_FORMAT),
       publishPlugins: mustGet(publishPlugins, pkg.name, 'publish plugins'),
       analyzeCommitsConfig,
       generateNotesConfig,
       bumpsForThisPackage,
+      bundled: mustGet(bundled, pkg.name, 'bundled dependencies'),
       dryRun,
       env,
       branches: options.branches,
     });
     const nextRelease = result === false ? undefined : result.nextRelease;
-    return { released: nextRelease !== undefined, version: nextRelease?.version, result };
+    return { released: nextRelease !== undefined, version: nextRelease?.version, releaseType, result };
   });
 
   const packages: PackageReleaseOutcome[] = entries.map((entry) => {
@@ -187,7 +198,7 @@ export interface ReleaseLoopEntry<TResult> {
 }
 
 /**
- * The per-package release loop shared by `releaseWorkspace` (normal per-package releases) and `detachWorkspaceRelease` (gated tag-only releases): iterate the topological `order`, call the caller's own `releaseOne` for each package, record which dependency-range bumps were already applied to it, and -- when it released -- bump every workspace dependent's manifest before that dependent's own turn (see `bumpDependents`'s doc comment for why this happens immediately rather than being staged). The two call sites differ only in how they call semantic-release (`semanticRelease(...)` vs `detachRelease(...)`) and how they read "did it release, and what version" off the result, both captured by `releaseOne`.
+ * The per-package release loop shared by `releaseWorkspace` (normal per-package releases) and `detachWorkspaceRelease` (gated tag-only releases): iterate the topological `order`, call the caller's own `releaseOne` for each package, record which dependency-range bumps were already applied to it, and -- when it released -- bump every workspace dependent's manifest before that dependent's own turn (see `bumpDependents`'s doc comment for why this happens immediately rather than being staged). The two call sites differ only in how they call semantic-release (`semanticRelease(...)` vs `detachRelease(...)`) and how they read "did it release, at what version and with which shipped release type" off the result, all captured by `releaseOne`.
  */
 export async function runReleaseLoop<TResult>(
   graph: DependencyGraph,
@@ -198,7 +209,13 @@ export async function runReleaseLoop<TResult>(
   releaseOne: (
     pkg: WorkspacePackage,
     bumpsForThisPackage: readonly AppliedDependencyBump[],
-  ) => Promise<{ readonly released: boolean; readonly version: string | undefined; readonly result: TResult }>,
+  ) => Promise<{
+    readonly released: boolean;
+    readonly version: string | undefined;
+    /** The released package's shipped release type (see `ScopedPlugins.shippedReleaseType`), recorded on every bump of its dependents; `undefined` when it did not release. */
+    readonly releaseType: ReleaseType | undefined;
+    readonly result: TResult;
+  }>,
 ): Promise<readonly ReleaseLoopEntry<TResult>[]> {
   // Bumps recorded for a dependent during the run; its scoped plugins read them to force a patch release and to add the dependency section to its notes, and the entry is consumed when its turn arrives.
   const pendingBumps = new Map<string, AppliedDependencyBump[]>();
@@ -211,21 +228,21 @@ export async function runReleaseLoop<TResult>(
 
     log(`Releasing ${name} from ${pkg.relativeDirectory}${bumpsForThisPackage.length > 0 ? ` (dependency ranges already bumped: ${bumpsForThisPackage.map((bump) => bump.dependency).join(', ')})` : ''}`);
     // A dry run pushes nothing and publishes nothing, so there is no branch state for it to race against and nothing to integrate.
-    const { released, version, result } = dryRun
+    const { released, version, releaseType, result } = dryRun
       ? await releaseOne(pkg, bumpsForThisPackage)
       : await releasePackageAcrossBranchMoves(name, branchTracker(workspace, log), async () => await releaseOne(pkg, bumpsForThisPackage), log);
 
     entries.push({ name, directory: pkg.directory, relativeDirectory: pkg.relativeDirectory, result, dependencyBumps: bumpsForThisPackage });
     pendingBumps.delete(name);
 
-    if (!released || version === undefined) {
+    if (!released || version === undefined || releaseType === undefined) {
       log(`${name}: no release`);
       continue;
     }
     log(`${name}: released ${version}`);
 
     identity ??= await resolveCommitIdentity({ cwd: workspace.root });
-    const bumps = await bumpDependents(pkg, version, graph, { workspace, dryRun, identity, log });
+    const bumps = await bumpDependents(pkg, { version, releaseType }, graph, { workspace, dryRun, identity, log });
     for (const bump of bumps) {
       const forDependent = pendingBumps.get(bump.dependent) ?? [];
       forDependent.push(bump);
@@ -241,16 +258,18 @@ async function runPackageRelease(pkg: WorkspacePackage, options: {
   readonly analyzeCommitsConfig: Record<string, unknown>;
   readonly generateNotesConfig: Record<string, unknown>;
   readonly bumpsForThisPackage: readonly AppliedDependencyBump[];
+  readonly bundled: BundledDependencies;
   readonly dryRun: boolean;
   readonly env: NodeJS.ProcessEnv | undefined;
   readonly branches: readonly BranchSpec[] | undefined;
   readonly tagFormat: string;
-}): Promise<Result> {
+}): Promise<{ readonly result: Result; readonly releaseType: ReleaseType | undefined }> {
   const scoped = createScopedPlugins({
     pkg,
     analyzeCommitsConfig: options.analyzeCommitsConfig,
     generateNotesConfig: options.generateNotesConfig,
     bumps: { bumpsFor: () => options.bumpsForThisPackage },
+    bundled: options.bundled,
   });
 
   const semanticReleaseOptions: Options = {
@@ -268,11 +287,12 @@ async function runPackageRelease(pkg: WorkspacePackage, options: {
   }
 
   try {
-    return await semanticRelease(semanticReleaseOptions, {
+    const result = await semanticRelease(semanticReleaseOptions, {
       cwd: pkg.directory,
       // A fresh copy per package: semantic-release mutates the env object it is given (setting GIT_AUTHOR_NAME and friends in CI mode), and that must not leak between packages or into the orchestrator's own git calls. Already sanitized by the caller (releaseWorkspace), so no GIT_DIR-style repository-discovery variable reaches here to begin with.
       env: { ...options.env },
     });
+    return { result, releaseType: result === false ? undefined : scoped.shippedReleaseType(result.nextRelease.type) };
   } catch (cause) {
     throw new WorkspaceReleaseError(`Release of ${pkg.name} failed: ${cause instanceof Error ? cause.message : String(cause)}`);
   }
@@ -286,7 +306,7 @@ const LOCKFILE_FILENAME = 'pnpm-lock.yaml';
  *
  * The bump is committed (and pushed) right away rather than staged, because a dependent's semantic-release run analyses git history, not the working tree: an uncommitted bump would be invisible to its commit analysis, and would be stranded uncommitted if the dependent then released nothing -- a manifest that names versions the registry has never seen. Committing immediately means the dependent's own run sees the bump commit (it touches only the dependent's directory, so it passes that dependent's path filter), the forced-patch logic in the scoped analyzer covers the case where that bump is the dependent's only change, and a run interrupted partway leaves the remote describing exactly what was published. Pushing immediately mirrors what semantic-release itself does with release commits. The lockfile is regenerated (`pnpm install --lockfile-only`) and committed alongside the manifest for the same reason: a manifest bump committed without it leaves `pnpm-lock.yaml` naming the old range, which `pnpm install --frozen-lockfile` (what CI runs) then rejects.
  */
-async function bumpDependents(released: WorkspacePackage, version: string, graph: DependencyGraph, options: {
+async function bumpDependents(released: WorkspacePackage, release: { readonly version: string; readonly releaseType: ReleaseType }, graph: DependencyGraph, options: {
   readonly workspace: Workspace;
   readonly dryRun: boolean;
   readonly identity: CommitIdentity;
@@ -298,6 +318,7 @@ async function bumpDependents(released: WorkspacePackage, version: string, graph
     return applied;
   }
 
+  const { version, releaseType } = release;
   for (const edge of dependents) {
     const update = updateDependencyRange(edge.range, version);
     if (update.kind === 'wildcard') {
@@ -310,8 +331,8 @@ async function bumpDependents(released: WorkspacePackage, version: string, graph
         await writeDependencyRange(dependent.manifestPath, edge.field, released.name, update.range);
         // Regenerated before the commit below, not after, so the two file writes always land in the same commit -- see the lockfile paragraph in this function's own doc comment.
         await regenerateLockfile({ cwd: options.workspace.root });
-        // The commit's message carries [skip ci] for the same reason semantic-release's own release commits do: pushing it must not trigger another CI release run that would race this one. It also carries a machine-parseable trailer (see dependency-bump-commit.ts) so a run that starts after this commit already exists in history -- including one recovering from a crash right after this push -- still recognises it as a dependency bump, rather than only a run that made the commit itself in memory recognising it.
-        const message = formatDependencyBumpMessage({ dependency: released.name, version, range: update.range, dependent: edge.dependent });
+        // The commit's message carries [skip ci] for the same reason semantic-release's own release commits do: pushing it must not trigger another CI release run that would race this one. It also carries a machine-parseable trailer (see dependency-bump-commit.ts) so a run that starts after this commit already exists in history -- including one recovering from a crash right after this push -- still recognises it as a dependency bump, rather than only a run that made the commit itself in memory recognising it. The trailer records the released package's shipped release type as well, so a dependent that bundles it recovers the type its own release must reach.
+        const message = formatDependencyBumpMessage({ dependency: released.name, version, range: update.range, releaseType, dependent: edge.dependent });
         await commitFiles([`${dependent.relativeDirectory}/package.json`, LOCKFILE_FILENAME], message, { cwd: options.workspace.root, identity: options.identity });
         await pushHead({ cwd: options.workspace.root });
         options.log(`Bumped ${released.name} to ${update.range} in ${edge.dependent}, regenerated the lockfile, committed and pushed`);
@@ -330,6 +351,7 @@ async function bumpDependents(released: WorkspacePackage, version: string, graph
       version,
       range: update.kind === 'rewritten' ? update.range : edge.range,
       kind: update.kind,
+      releaseType,
     });
   }
   return applied;

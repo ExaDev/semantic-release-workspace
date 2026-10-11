@@ -10,6 +10,7 @@ export { discoverWorkspace, type Workspace, type WorkspacePackage } from './work
 export { buildDependencyGraph, orderedPackages, topologicalOrder, type DependencyGraph, type WorkspaceDependency } from './graph';
 export { classifyDependencyRange, updateDependencyRange, type DependencyRangeShape, type DependencyRangeUpdate } from './version-range';
 export { readManifest, writeDependencyRange, type DependencyField, type PackageManifest } from './manifest';
+export { resolveBundledDependencies, type BundledDependencies } from './bundling';
 
 export {
   createScopedPlugins,
