@@ -200,6 +200,22 @@ describe('readReleaseConfigFile', () => {
     await expect(readReleaseConfigFile(path)).rejects.toThrow(/--config file .*: tagFormat must contain '\$\{version\}'/);
   });
 
+  it('reads bundlingPackages', async () => {
+    const path = await temporaryConfigFile('release.config.json', JSON.stringify({ bundlingPackages: ['process-graph'] }));
+    expect((await readReleaseConfigFile(path)).bundlingPackages).toEqual(['process-graph']);
+  });
+
+  it('leaves bundlingPackages undefined when the config file omits it, so every package keeps the forced patch', async () => {
+    const path = await temporaryConfigFile('release.config.json', JSON.stringify({ dryRun: true }));
+    expect((await readReleaseConfigFile(path)).bundlingPackages).toBeUndefined();
+  });
+
+  it('rejects bundlingPackages that is not an array of strings', async () => {
+    const path = await temporaryConfigFile('release.config.json', JSON.stringify({ bundlingPackages: 'process-graph' }));
+    await expect(readReleaseConfigFile(path)).rejects.toThrow(InvalidArgumentError);
+    await expect(readReleaseConfigFile(path)).rejects.toThrow(/"bundlingPackages" must be an array of package name strings/);
+  });
+
   it('rejects a tagFormat with a placeholder other than name and version', async () => {
     const path = await temporaryConfigFile('release.config.json', JSON.stringify({ tagFormat: '${package}-v${version}' }));
     await expect(readReleaseConfigFile(path)).rejects.toThrow(InvalidArgumentError);
@@ -224,6 +240,14 @@ describe('createProgram', () => {
     expect(gateStateFile?.mandatory).toBe(true);
     const optionFlags = (resume?.options ?? []).map((option) => option.long);
     expect(optionFlags).toContain('--root');
+  });
+
+  it('registers a repeatable --bundling-package on the release command', async () => {
+    const release = createProgram().commands.find((command) => command.name() === 'release');
+    expect((release?.options ?? []).map((option) => option.long)).toContain('--bundling-package');
+    release?.action(() => undefined);
+    await release?.parseAsync(['--bundling-package', 'a', '--bundling-package', 'b'], { from: 'user' });
+    expect(release?.opts().bundlingPackage).toEqual(['a', 'b']);
   });
 
   it('registers --tag-format on the release command', () => {

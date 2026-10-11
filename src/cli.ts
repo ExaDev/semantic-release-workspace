@@ -22,6 +22,7 @@ const CONFIG_OPTION_KEYS: ReadonlySet<string> = new Set([
   'commitStrategy',
   'gatePublish',
   'tagFormat',
+  'bundlingPackages',
 ]);
 const COMMIT_STRATEGIES: ReadonlySet<string> = new Set<CommitStrategy>(['per-package', 'single']);
 
@@ -69,8 +70,14 @@ export function createProgram(): Command {
     'with --gate-publish: where to write the state a later "resume" run needs to finish publishing',
   );
   release.option(
+    '--bundling-package <name>',
+    'a public package whose build bundles its workspace devDependencies, so it releases as at least their release type rather than a forced patch; repeat for several packages',
+    collectRepeated,
+    [],
+  );
+  release.option(
     '--config <file>',
-    'config file (.json, .yaml, .yml, .js, .cjs, or .ts) providing any of the release options (dryRun, branches, plugins, packagePlugins, analyzeCommits, generateNotes, commitStrategy, tagFormat, gatePublish); explicit flags win',
+    'config file (.json, .yaml, .yml, .js, .cjs, or .ts) providing any of the release options (dryRun, branches, plugins, packagePlugins, analyzeCommits, generateNotes, commitStrategy, tagFormat, gatePublish, bundlingPackages); explicit flags win',
   );
   release.action(runRelease);
 
@@ -119,6 +126,7 @@ interface ReleaseFlags {
   readonly tagFormat: string | undefined;
   readonly gatePublish: boolean | undefined;
   readonly gateStateFile: string | undefined;
+  readonly bundlingPackage: string[];
   readonly config: string | undefined;
 }
 
@@ -132,6 +140,7 @@ const NO_CONFIG_FILE: ReleaseConfigFile = {
   commitStrategy: undefined,
   tagFormat: undefined,
   gatePublish: undefined,
+  bundlingPackages: undefined,
 };
 
 async function runRelease(flags: ReleaseFlags): Promise<void> {
@@ -154,6 +163,7 @@ async function runRelease(flags: ReleaseFlags): Promise<void> {
     commitStrategy: flags.commitStrategy ?? file.commitStrategy,
     tagFormat: flags.tagFormat ?? file.tagFormat,
     gatePublish,
+    bundlingPackages: flags.bundlingPackage.length > 0 ? flags.bundlingPackage : file.bundlingPackages,
   });
 
   for (const pkg of outcome.packages) {
@@ -242,6 +252,7 @@ export interface ReleaseConfigFile {
   readonly commitStrategy: CommitStrategy | undefined;
   readonly tagFormat: string | undefined;
   readonly gatePublish: boolean | undefined;
+  readonly bundlingPackages: readonly string[] | undefined;
 }
 
 // The asynchronous explorer, not `cosmiconfigSync`: the synchronous one loads `.js` and `.ts` files through `require()`, which for a module using `export default` returns the whole module namespace (`default`, `__esModule`, and every named export) rather than the default export, so a config file exporting anything besides its default would be rejected as having unknown options. The asynchronous one imports the file and hands back its default export.
@@ -271,7 +282,7 @@ export async function readReleaseConfigFile(path: string): Promise<ReleaseConfig
     }
   }
 
-  const { dryRun, branches, plugins, packagePlugins, analyzeCommits, generateNotes, commitStrategy, tagFormat, gatePublish } = parsed;
+  const { dryRun, branches, plugins, packagePlugins, analyzeCommits, generateNotes, commitStrategy, tagFormat, gatePublish, bundlingPackages } = parsed;
   if (dryRun !== undefined && typeof dryRun !== 'boolean') {
     throw new InvalidArgumentError(`--config file ${path}: "dryRun" must be a boolean`);
   }
@@ -299,6 +310,9 @@ export async function readReleaseConfigFile(path: string): Promise<ReleaseConfig
   if (gatePublish !== undefined && typeof gatePublish !== 'boolean') {
     throw new InvalidArgumentError(`--config file ${path}: "gatePublish" must be a boolean`);
   }
+  if (bundlingPackages !== undefined && !isStringArray(bundlingPackages)) {
+    throw new InvalidArgumentError(`--config file ${path}: "bundlingPackages" must be an array of package name strings`);
+  }
 
   return {
     dryRun,
@@ -310,6 +324,7 @@ export async function readReleaseConfigFile(path: string): Promise<ReleaseConfig
     commitStrategy,
     tagFormat: tagFormat === undefined ? undefined : validateTagFormatOption(tagFormat, (message) => `--config file ${path}: ${message}`),
     gatePublish,
+    bundlingPackages,
   };
 }
 
