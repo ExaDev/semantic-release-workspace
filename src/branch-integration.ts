@@ -20,11 +20,9 @@ export interface BranchTracker {
   readonly tip: () => Promise<string>;
 }
 
-/** What one attempt at releasing a package reports back: whether it released, at what version, and the caller's own opaque result. */
-export interface PackageReleaseAttempt<TResult> {
+/** What one attempt at releasing a package must report back for this loop: whether it released. Everything else the caller's attempt returns is passed through untouched. */
+export interface PackageReleaseAttempt {
   readonly released: boolean;
-  readonly version: string | undefined;
-  readonly result: TResult;
 }
 
 /**
@@ -36,12 +34,12 @@ export interface PackageReleaseAttempt<TResult> {
  *
  * A package whose answer is never established fails the run. Returning "nothing to release" for it would be a guess, and the guess that loses is exactly the silent partial release this loop exists to stop.
  */
-export async function releasePackageAcrossBranchMoves<TResult>(
+export async function releasePackageAcrossBranchMoves<TAttempt extends PackageReleaseAttempt>(
   name: string,
   branch: BranchTracker,
-  attempt: () => Promise<PackageReleaseAttempt<TResult>>,
+  attempt: () => Promise<TAttempt>,
   log: (message: string) => void,
-): Promise<PackageReleaseAttempt<TResult>> {
+): Promise<TAttempt> {
   for (let moves = 1; ; moves += 1) {
     const tipBefore = await branch.integrate();
     const outcome = await attempt();
