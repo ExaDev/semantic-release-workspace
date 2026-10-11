@@ -35,11 +35,13 @@ Why commit immediately, rather than the alternatives:
 - **Why commit at all (not just edit the working tree)?** A dependent's semantic-release run analyses *git history*, not the working tree. An uncommitted manifest edit is invisible to its commit analysis, so the dependent could be judged "no changes" and skip a release — leaving a manifest that names a version the registry has, but which the dependent never published, stranded uncommitted in one developer's checkout.
 - **Why regenerate `pnpm-lock.yaml` in the same commit?** `pnpm install --frozen-lockfile` (what CI runs) rejects a tree where the lockfile's recorded specifier for a workspace dependency disagrees with the manifest. Committing the manifest bump without regenerating the lockfile leaves exactly that disagreement, breaking `--frozen-lockfile` installs on the dependent's directory until someone runs `pnpm install` by hand and commits the result — so the lockfile is regenerated and committed alongside the manifest, never as a separate step.
 - **Why before the dependent's own run (not after)?** The dependent's release commit and its published artifact must carry the new range. Bumping after would publish the dependent with a stale range, then mutate the repository afterwards — the repository/published-artifact disagreement this tool exists to prevent.
-- **Why push immediately?** The same crash-consistency discipline semantic-release applies to its own release commits: if the orchestrator dies halfway through the run, everything pushed so far (releases, tags, bump commits) is a consistent prefix, and the next run picks up cleanly from the tags. `[skip ci]` on the bump message stops the push from triggering a *second*, racing release run. The bump commit also carries a machine-parseable trailer alongside its human-readable subject, recording the dependency, its released version, and the new range -- so a fresh run's per-package analysis recognises a bump commit that already exists in history (whether from earlier in the same run or left over from a run that stopped right after pushing it) and still forces the dependent's patch release, rather than depending on a record that only ever existed in the process that made the commit.
+- **Why push immediately?** The same crash-consistency discipline semantic-release applies to its own release commits: if the orchestrator dies halfway through the run, everything pushed so far (releases, tags, bump commits) is a consistent prefix, and the next run picks up cleanly from the tags. `[skip ci]` on the bump message stops the push from triggering a *second*, racing release run. The bump commit also carries a machine-parseable trailer alongside its human-readable subject, recording the dependency, its released version, the new range, and the release type the dependency shipped with -- so a fresh run's per-package analysis recognises a bump commit that already exists in history (whether from earlier in the same run or left over from a run that stopped right after pushing it) and still releases the dependent (the forced patch, or the bundled release type for a package named in `bundlingPackages`), rather than depending on a record that only ever existed in the process that made the commit.
 
 Because every dependent sits downstream in topological order, its own run always sees the bump commit: the commit touches only the dependent's directory, so it passes that dependent's path filter and participates in its analysis.
 
 **A package whose only change is dependency bumps still gets a patch release — deliberately.** A range rewritten on disk (`^1.0.0` → `^1.1.0`) changes the dependent's *published* dependency range, so the dependent must be republished for the change to reach consumers. A range that names no version, such as a bare `workspace:^` in a private package, has nothing to rewrite, but the dependent still releases, so a package always follows a sibling it depends on. This is not left to chance: the wrapped `analyzeCommits` returns `patch` whenever the standard analyzer found nothing but this run bumped one of the package's dependency ranges, so the behaviour does not depend on how the workspace's own analyzer config happens to classify `chore(deps)` commits (many presets release nothing for `chore`). Release notes gain a `### Dependencies` section listing the bumps, so the release is self-explaining rather than empty.
+
+A patch is right for a dependent that installs the sibling from the registry, since the sibling's change reaches consumers through the sibling's own release. It is wrong for a dependent that bundles the sibling into its own build, where the sibling's change reaches consumers only through the dependent: name such a package in `bundlingPackages` and it releases as at least the sibling's release type instead (see [Packages that bundle their siblings](#packages-that-bundle-their-siblings)).
 
 Dependency-range handling, in full:
 
@@ -232,6 +234,7 @@ Run it from the workspace root (or pass `--root <directory>`). A dry run analyse
 | `--tag-format <template>` | Template for each package's release tag, with `${name}` and `${version}` placeholders; must contain `${version}` (default: `${name}@${version}`) — see [Tag format](#tag-format) |
 | `--gate-publish` | Tag and push each due package, but defer publishing — see [Gating publish](#gating-publish). Requires `--gate-state-file`; rejected with `--commit-strategy single` |
 | `--gate-state-file <path>` | With `--gate-publish`: where to write the state a later `resume` run needs |
+| `--bundling-package <name>` | A public package whose build bundles its workspace `devDependencies`, repeatable; see [Packages that bundle their siblings](#packages-that-bundle-their-siblings) |
 | `--config <file>` | A config file (`.json`, `.yaml`, `.yml`, `.js`, `.cjs`, `.mjs`, `.ts`, `.cts`, or `.mts`, loaded via [cosmiconfig](https://github.com/cosmiconfig/cosmiconfig)) providing any of the above, plus `packagePlugins` (see [Per-package publish plugins](#per-package-publish-plugins)), through its default export; explicit flags win. TypeScript files are run by Node's own type stripping, so they may use only erasable type syntax (annotations and `import type`, not `enum` or `namespace`) |
 
 `resume` (a separate subcommand, not a `release` flag) finishes publishing what a `--gate-publish` run tagged and pushed:
@@ -275,6 +278,29 @@ export default config;
 
 The override behaves the same under both commit strategies and with `gatePublish`. A gated run persists each package's pipeline in its state file, so the override reaches `resume` without being repeated there. Under `commitStrategy: 'single'` start from `SINGLE_COMMIT_DEFAULT_PUBLISH_PLUGINS` instead of `DEFAULT_PUBLISH_PLUGINS`.
 
+### Packages that bundle their siblings
+
+Some workspaces publish one package that inlines private siblings into its own build and lists them in `devDependencies`, so consumers install only the one package. A `feat` in one of those siblings is a new feature of the published package, but by default the published package gets the forced patch any dependency bump gives it (see [The manifest-bump timing decision](#the-manifest-bump-timing-decision)). `bundlingPackages` names the packages this applies to:
+
+```ts
+// release-workspace.config.ts
+import type { ReleaseWorkspaceOptions } from '@exadev/semantic-release-workspace';
+
+const config: ReleaseWorkspaceOptions = {
+  bundlingPackages: ['process-graph'],
+};
+
+export default config;
+```
+
+A named package releases as the highest release type among the releases of its workspace `devDependencies` in the run: a `fix` in a bundled sibling makes it a patch, a `feat` a minor and a breaking change a major. With releasable commits of its own it takes the higher of its own type and that one. Its `dependencies`, `peerDependencies` and `optionalDependencies` siblings are installed by consumers, so a release of one of those still gives the forced patch.
+
+A sibling bundled only indirectly counts too. When a bundled private package depends at run time (`dependencies`, `peerDependencies` or `optionalDependencies`) on another private package, a bundle that inlines the first inlines the second, so the second's release type reaches the named package through the first even when the named package does not list it.
+
+Nothing else changes. Private packages keep their own version bumps, the forced patch included, so their versions and tags are what they would be without the option, and they are still never published. The release type travels in the bump commit's trailer, so a run that resumes after a partial push reaches the same release type.
+
+The option is off unless set, because a workspace `devDependencies` entry is not bundled in general: a public package's test helpers or lint config are workspace `devDependencies` whose changes never reach its consumers, and those keep the forced patch. Name only packages whose every workspace `devDependencies` entry ships inside their build. A name that is not a package in the workspace, or names a private package, is rejected before anything releases. The option applies under both commit strategies and with `gatePublish`, and is set with `--bundling-package <name>` (repeatable), the `bundlingPackages` field in a `--config` file, or the `bundlingPackages` option to `releaseWorkspace()`.
+
 ### Programmatic API
 
 ```ts
@@ -307,7 +333,7 @@ const outcome = await releaseWorkspace({
 });
 ```
 
-Every stage is also exported individually — `discoverWorkspace`, `buildDependencyGraph`, `topologicalOrder`, `updateDependencyRange`, `createScopedPlugins`, `filterCommitsToDirectory`, `resumeWorkspaceRelease` — along with the error hierarchy (`WorkspaceReleaseError` and friends) so embedders can distinguish orchestration failures from unexpected crashes.
+Every stage is also exported individually — `discoverWorkspace`, `buildDependencyGraph`, `topologicalOrder`, `updateDependencyRange`, `resolveBundledDependencies`, `createScopedPlugins`, `filterCommitsToDirectory`, `resumeWorkspaceRelease` — along with the error hierarchy (`WorkspaceReleaseError` and friends) so embedders can distinguish orchestration failures from unexpected crashes.
 
 ### Repository requirements
 
