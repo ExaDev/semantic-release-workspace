@@ -21,9 +21,9 @@ export interface DependencyBump {
   readonly range: string;
   readonly kind: 'rewritten' | 'resolved-at-publish';
   /**
-   * The highest release type in the code the dependency ships as of this release: its own release type, raised by the shipped release type of every sibling it bundles (see `BundledDependencies`). A dependent that bundles the dependency takes at least this release type; any other dependent ignores it and keeps the forced patch. `undefined` only for a bump recovered from a commit written before its trailer recorded the type, which counts as a patch.
+   * The highest release type in the code the dependency ships as of this release: its own release type, raised by the shipped release type of every sibling it bundles (see `BundledDependencies`). A dependent that bundles the dependency takes at least this release type; any other dependent ignores it and keeps the forced patch. Absent only for a bump recovered from a commit written before its trailer recorded the type, or supplied by a `DependencyBumpSource` that does not know it, and then counts as a patch.
    */
-  readonly releaseType: ReleaseType | undefined;
+  readonly releaseType?: ReleaseType | undefined;
 }
 
 /** What the scoped plugins need to know about bumps recorded so far in the run, for the package they are about to analyse. */
@@ -92,8 +92,8 @@ export function createScopedPlugins(scope: {
   readonly analyzeCommitsConfig: Record<string, unknown>;
   readonly generateNotesConfig: Record<string, unknown>;
   readonly bumps: DependencyBumpSource;
-  /** Which of the package's workspace dependencies it bundles; see `resolveBundledDependencies`. */
-  readonly bundled: BundledDependencies;
+  /** Which of the package's workspace dependencies it bundles; see `resolveBundledDependencies`. Omitted for a package that bundles none, which keeps the forced patch for every dependency bump. */
+  readonly bundled?: BundledDependencies;
   /** Called with the path-filtered commit list every time this package's commits are resolved (from either step, whichever runs first). Optional: `commitStrategy: 'single'` uses it to capture the same filtered list `success()`'s GitHub plugin step needs later, without recomputing `changedPathsSince`/`filterCommitsToDirectory` itself from the outside. */
   readonly onCommitsResolved?: (commits: readonly Commit[]) => void;
 }): ScopedPlugins {
@@ -125,8 +125,8 @@ export function createScopedPlugins(scope: {
       }
       const own = typeof analysed === 'string' ? analysed : undefined;
       const bumps = mergeDependencyBumps(scope.bumps.bumpsFor(scope.pkg.name), commits);
-      carriedReleaseType = releaseTypeOfBumps(bumps.filter((bump) => scope.bundled.carried.has(bump.dependency)));
-      const bundledBumps = bumps.filter((bump) => scope.bundled.releaseTypeFrom.has(bump.dependency));
+      carriedReleaseType = releaseTypeOfBumps(bumps.filter((bump) => scope.bundled?.carried.has(bump.dependency) === true));
+      const bundledBumps = bumps.filter((bump) => scope.bundled?.releaseTypeFrom.has(bump.dependency) === true);
       const fromBundled = releaseTypeOfBumps(bundledBumps);
 
       if (own !== undefined) {
