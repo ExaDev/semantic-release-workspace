@@ -1,32 +1,92 @@
 ## [3.2.15](https://github.com/ExaDev/semantic-release-workspace/compare/v3.2.14...v3.2.15) (2026-10-28)
 
+### Build System
+
+* **deps-dev:** bump turbo from 2.11.9 to 2.11.10 ([a847742](https://github.com/ExaDev/semantic-release-workspace/commit/a8477422db7b3f20b22dd45ea4c1a5e1f0dfafd3))
+
 ## [3.2.14](https://github.com/ExaDev/semantic-release-workspace/compare/v3.2.13...v3.2.14) (2026-10-27)
+
+### Build System
+
+* **deps-dev:** bump typescript-eslint from 8.71.2 to 8.72.0 ([e5da03d](https://github.com/ExaDev/semantic-release-workspace/commit/e5da03d090333543d9628f17f72d0b5e165a9065))
 
 ## [3.2.13](https://github.com/ExaDev/semantic-release-workspace/compare/v3.2.12...v3.2.13) (2026-10-26)
 
+### Build System
+
+* **deps-dev:** bump @commitlint/cli from 21.2.3 to 21.2.4 ([cbef2f8](https://github.com/ExaDev/semantic-release-workspace/commit/cbef2f884ffb46bc4c14cb796362601e6551e727))
+
 ## [3.2.12](https://github.com/ExaDev/semantic-release-workspace/compare/v3.2.11...v3.2.12) (2026-10-26)
+
+### Build System
+
+* **deps-dev:** bump eslint from 10.12.0 to 10.13.0 ([0e56c87](https://github.com/ExaDev/semantic-release-workspace/commit/0e56c87419c34d8cf89589eee72caf778db96f7a))
 
 ## [3.2.11](https://github.com/ExaDev/semantic-release-workspace/compare/v3.2.10...v3.2.11) (2026-10-26)
 
+### Build System
+
+* **deps-dev:** bump @commitlint/config-conventional ([ddbbd9d](https://github.com/ExaDev/semantic-release-workspace/commit/ddbbd9d8c2f726b320f5cb056f481268c59eed08))
+
 ## [3.2.10](https://github.com/ExaDev/semantic-release-workspace/compare/v3.2.9...v3.2.10) (2026-10-26)
+
+### Build System
+
+* **deps-dev:** bump turbo from 2.11.8 to 2.11.9 ([39f52d8](https://github.com/ExaDev/semantic-release-workspace/commit/39f52d8b2b846c2c7755c83b0caaf81f152fe97d))
 
 ## [3.2.9](https://github.com/ExaDev/semantic-release-workspace/compare/v3.2.8...v3.2.9) (2026-10-21)
 
+### Build System
+
+* **deps-dev:** bump turbo from 2.11.7 to 2.11.8 ([29853df](https://github.com/ExaDev/semantic-release-workspace/commit/29853df54620dd9566112ab980f0017378d9606d))
+
 ## [3.2.8](https://github.com/ExaDev/semantic-release-workspace/compare/v3.2.7...v3.2.8) (2026-10-20)
+
+### Build System
+
+* **deps-dev:** bump typescript-eslint from 8.71.1 to 8.71.2 ([383abfc](https://github.com/ExaDev/semantic-release-workspace/commit/383abfca7fa7238aea7168a49500edfa76e84998))
 
 ## [3.2.7](https://github.com/ExaDev/semantic-release-workspace/compare/v3.2.6...v3.2.7) (2026-10-19)
 
+### Build System
+
+* **deps-dev:** bump @types/node from 26.6.4 to 26.6.5 ([cfc7701](https://github.com/ExaDev/semantic-release-workspace/commit/cfc77013a5560fe1c6929438f6a07acc26e137ad))
+
 ## [3.2.6](https://github.com/ExaDev/semantic-release-workspace/compare/v3.2.5...v3.2.6) (2026-10-19)
+
+### Build System
+
+* **deps-dev:** bump tsdown from 0.23.0 to 0.23.1 ([4fc1453](https://github.com/ExaDev/semantic-release-workspace/commit/4fc14538ac615ba1c1931a29098284a8ecaddeb0))
 
 ## [3.2.5](https://github.com/ExaDev/semantic-release-workspace/compare/v3.2.4...v3.2.5) (2026-10-14)
 
+### Build System
+
+* **deps:** bump @exadev/release-gate from 1.0.2 to 1.0.3 ([af18a70](https://github.com/ExaDev/semantic-release-workspace/commit/af18a70549de31675144b87b883af10c8623553f))
+
 ## [3.2.4](https://github.com/ExaDev/semantic-release-workspace/compare/v3.2.3...v3.2.4) (2026-10-14)
+
+### Build System
+
+* **deps-dev:** bump typescript-eslint from 8.71.0 to 8.71.1 ([3937bf2](https://github.com/ExaDev/semantic-release-workspace/commit/3937bf21cc98e3852f879f0afceb02a6174402e5))
 
 ## [3.2.3](https://github.com/ExaDev/semantic-release-workspace/compare/v3.2.2...v3.2.3) (2026-10-12)
 
+### Build System
+
+* **deps-dev:** bump eslint from 10.11.0 to 10.12.0 ([201e55b](https://github.com/ExaDev/semantic-release-workspace/commit/201e55b3a92585ab8ef09b9b4b2a229627242a41))
+
 ## [3.2.2](https://github.com/ExaDev/semantic-release-workspace/compare/v3.2.1...v3.2.2) (2026-10-12)
 
+### Build System
+
+* **deps:** bump @exadev/release-gate from 1.0.1 to 1.0.2 ([62d1c3f](https://github.com/ExaDev/semantic-release-workspace/commit/62d1c3ffc9281f1e0f31198b098918da45c71308))
+
 ## [3.2.1](https://github.com/ExaDev/semantic-release-workspace/compare/v3.2.0...v3.2.1) (2026-10-12)
+
+### Build System
+
+* **deps-dev:** bump turbo from 2.11.6 to 2.11.7 ([56c8594](https://github.com/ExaDev/semantic-release-workspace/commit/56c8594c1aa71fe773d387b1383b5c2672bbdbda))
 
 # [3.2.0](https://github.com/ExaDev/semantic-release-workspace/compare/v3.1.29...v3.2.0) (2026-10-11)
 
@@ -45,61 +105,177 @@
 
 ## [3.1.29](https://github.com/ExaDev/semantic-release-workspace/compare/v3.1.28...v3.1.29) (2026-10-09)
 
+### Build System
+
+* **deps-dev:** bump turbo from 2.11.5 to 2.11.6 ([29e2d1e](https://github.com/ExaDev/semantic-release-workspace/commit/29e2d1e54bbfbfda34c06c8bf81983e3056f07e5))
+
 ## [3.1.28](https://github.com/ExaDev/semantic-release-workspace/compare/v3.1.27...v3.1.28) (2026-10-09)
+
+### Build System
+
+* **deps-dev:** bump @types/node from 26.6.3 to 26.6.4 ([cf90518](https://github.com/ExaDev/semantic-release-workspace/commit/cf90518b9e8c8bd5f41e52fde7435c1bc5b8664d))
 
 ## [3.1.27](https://github.com/ExaDev/semantic-release-workspace/compare/v3.1.26...v3.1.27) (2026-10-09)
 
+### Build System
+
+* **deps-dev:** bump publint from 0.3.24 to 0.3.25 ([647d52a](https://github.com/ExaDev/semantic-release-workspace/commit/647d52a4d95a971cfdf1793c0721aa6b8f1fabc0))
+
 ## [3.1.26](https://github.com/ExaDev/semantic-release-workspace/compare/v3.1.25...v3.1.26) (2026-10-09)
+
+### Build System
+
+* **deps-dev:** bump globals from 17.12.0 to 17.13.0 ([e648771](https://github.com/ExaDev/semantic-release-workspace/commit/e648771aa4511413994560ca5638622e280d9639))
 
 ## [3.1.25](https://github.com/ExaDev/semantic-release-workspace/compare/v3.1.24...v3.1.25) (2026-10-06)
 
+### Chores
+
+* upgrade turbo to 2.11.5 and disable agentGuidance ([0f41e8d](https://github.com/ExaDev/semantic-release-workspace/commit/0f41e8d8c90a03f325736fa1a62cfef4d9c99175))
+
 ## [3.1.24](https://github.com/ExaDev/semantic-release-workspace/compare/v3.1.23...v3.1.24) (2026-10-06)
+
+### Build System
+
+* **deps-dev:** bump typescript-eslint from 8.70.1 to 8.71.0 ([f0f7039](https://github.com/ExaDev/semantic-release-workspace/commit/f0f70395ac200ed1eecbd52ea153e243038d573f))
 
 ## [3.1.23](https://github.com/ExaDev/semantic-release-workspace/compare/v3.1.22...v3.1.23) (2026-10-05)
 
+### Build System
+
+* **deps-dev:** bump turbo from 2.11.4 to 2.11.5 ([01d981b](https://github.com/ExaDev/semantic-release-workspace/commit/01d981b49c6a7fb943fd29c966b301c6d4e49403))
+
 ## [3.1.22](https://github.com/ExaDev/semantic-release-workspace/compare/v3.1.21...v3.1.22) (2026-10-05)
+
+### Build System
+
+* **deps-dev:** bump @types/node from 26.6.2 to 26.6.3 ([5b1de4d](https://github.com/ExaDev/semantic-release-workspace/commit/5b1de4d2395000fefeda240e516a40642c69de83))
 
 ## [3.1.21](https://github.com/ExaDev/semantic-release-workspace/compare/v3.1.20...v3.1.21) (2026-10-05)
 
+### Build System
+
+* **deps-dev:** bump lint-staged from 17.5.1 to 17.6.0 ([70c0626](https://github.com/ExaDev/semantic-release-workspace/commit/70c0626eb9edc87e2492673560f253f19cbd91f5))
+
 ## [3.1.20](https://github.com/ExaDev/semantic-release-workspace/compare/v3.1.19...v3.1.20) (2026-10-02)
+
+### Documentation
+
+* use one shared badge set in the readme ([87ef822](https://github.com/ExaDev/semantic-release-workspace/commit/87ef8222dc442db34d14084826c5b3bfe0f6edb4))
 
 ## [3.1.19](https://github.com/ExaDev/semantic-release-workspace/compare/v3.1.18...v3.1.19) (2026-10-02)
 
+### Documentation
+
+* add live usage charts to the readme ([6ae586f](https://github.com/ExaDev/semantic-release-workspace/commit/6ae586fadc81bb2d1de963fbf910f60663559738))
+
 ## [3.1.18](https://github.com/ExaDev/semantic-release-workspace/compare/v3.1.17...v3.1.18) (2026-10-02)
+
+### Build System
+
+* **deps-dev:** bump turbo from 2.11.3 to 2.11.4 ([369b501](https://github.com/ExaDev/semantic-release-workspace/commit/369b5018c930c28a0a67dc98fa1234a390970c93))
 
 ## [3.1.17](https://github.com/ExaDev/semantic-release-workspace/compare/v3.1.16...v3.1.17) (2026-09-30)
 
+### Build System
+
+* **deps-dev:** bump turbo from 2.11.2 to 2.11.3 ([a1f756a](https://github.com/ExaDev/semantic-release-workspace/commit/a1f756a8183aac17bad95942e901fe196b3d55d4))
+
 ## [3.1.16](https://github.com/ExaDev/semantic-release-workspace/compare/v3.1.15...v3.1.16) (2026-09-29)
+
+### Build System
+
+* **deps-dev:** bump typescript-eslint from 8.70.0 to 8.70.1 ([691609d](https://github.com/ExaDev/semantic-release-workspace/commit/691609d9c81f88e22f0104cf3b1549a7494c0273))
 
 ## [3.1.15](https://github.com/ExaDev/semantic-release-workspace/compare/v3.1.14...v3.1.15) (2026-09-29)
 
+### Build System
+
+* **deps-dev:** bump @semantic-release/npm from 13.1.5 to 13.2.0 ([23d821a](https://github.com/ExaDev/semantic-release-workspace/commit/23d821a36e20f0896f73e6a91969bf58fc9c8bfc))
+
 ## [3.1.14](https://github.com/ExaDev/semantic-release-workspace/compare/v3.1.13...v3.1.14) (2026-09-29)
+
+### Build System
+
+* **deps-dev:** bump @commitlint/cli from 21.2.2 to 21.2.3 ([f1776d3](https://github.com/ExaDev/semantic-release-workspace/commit/f1776d3eebbfcce0ebbd135627332ab0a7701459))
 
 ## [3.1.13](https://github.com/ExaDev/semantic-release-workspace/compare/v3.1.12...v3.1.13) (2026-09-29)
 
+### Build System
+
+* **deps-dev:** bump @semantic-release/github from 12.0.9 to 12.0.10 ([a603ef4](https://github.com/ExaDev/semantic-release-workspace/commit/a603ef4f456319fcca749010cb87041359c7000a))
+
 ## [3.1.12](https://github.com/ExaDev/semantic-release-workspace/compare/v3.1.11...v3.1.12) (2026-09-28)
+
+### Build System
+
+* **deps-dev:** bump turbo from 2.10.13 to 2.11.2 ([433065b](https://github.com/ExaDev/semantic-release-workspace/commit/433065b30c8225e0c817fb4b51d61e86f95f614d))
 
 ## [3.1.11](https://github.com/ExaDev/semantic-release-workspace/compare/v3.1.10...v3.1.11) (2026-09-28)
 
+### Build System
+
+* **deps-dev:** bump eslint from 10.10.0 to 10.11.0 ([007f7f3](https://github.com/ExaDev/semantic-release-workspace/commit/007f7f3df14246975fe7e8ddaa567a82e62106ff))
+
 ## [3.1.10](https://github.com/ExaDev/semantic-release-workspace/compare/v3.1.9...v3.1.10) (2026-09-28)
+
+### Build System
+
+* **deps-dev:** bump @types/node from 26.6.1 to 26.6.2 ([ef7d861](https://github.com/ExaDev/semantic-release-workspace/commit/ef7d8613487148c6bff8248a489a6e0a7ca8e117))
 
 ## [3.1.9](https://github.com/ExaDev/semantic-release-workspace/compare/v3.1.8...v3.1.9) (2026-09-28)
 
+### Build System
+
+* **deps-dev:** bump @commitlint/config-conventional ([b13e945](https://github.com/ExaDev/semantic-release-workspace/commit/b13e945b201d721192457d2546c8e6247dd1489f))
+
 ## [3.1.8](https://github.com/ExaDev/semantic-release-workspace/compare/v3.1.7...v3.1.8) (2026-09-23)
+
+### Build System
+
+* **deps-dev:** bump @types/node from 26.5.1 to 26.6.1 ([96573f0](https://github.com/ExaDev/semantic-release-workspace/commit/96573f0ece88f23be77e01c97cd3aa5e09770da9))
 
 ## [3.1.7](https://github.com/ExaDev/semantic-release-workspace/compare/v3.1.6...v3.1.7) (2026-09-22)
 
+### Build System
+
+* **deps-dev:** bump turbo from 2.10.12 to 2.10.13 ([4150c4f](https://github.com/ExaDev/semantic-release-workspace/commit/4150c4f3ba3fda10ebc2d7634823a738fa22fa37))
+
 ## [3.1.6](https://github.com/ExaDev/semantic-release-workspace/compare/v3.1.5...v3.1.6) (2026-09-22)
+
+### Build System
+
+* **deps-dev:** bump @exadev/eslint-config from 2.12.1 to 2.12.3 ([4e8e759](https://github.com/ExaDev/semantic-release-workspace/commit/4e8e759dbf99daea7ef38bb76c9084e27cc9ed09))
 
 ## [3.1.5](https://github.com/ExaDev/semantic-release-workspace/compare/v3.1.4...v3.1.5) (2026-09-22)
 
+### Build System
+
+* **deps:** bump @exadev/release-gate from 1.0.0 to 1.0.1 ([44ebbaa](https://github.com/ExaDev/semantic-release-workspace/commit/44ebbaa00d284b85e4f55b745892987fac9cd6a0))
+
 ## [3.1.4](https://github.com/ExaDev/semantic-release-workspace/compare/v3.1.3...v3.1.4) (2026-09-21)
+
+### Build System
+
+* **deps-dev:** bump lint-staged from 17.5.0 to 17.5.1 ([f55b5b4](https://github.com/ExaDev/semantic-release-workspace/commit/f55b5b4ac3e3b6554c4847346da7eccc2b756d29))
 
 ## [3.1.3](https://github.com/ExaDev/semantic-release-workspace/compare/v3.1.2...v3.1.3) (2026-09-21)
 
+### Build System
+
+* **deps-dev:** bump @types/node from 26.4.1 to 26.5.1 ([f5c5709](https://github.com/ExaDev/semantic-release-workspace/commit/f5c5709592ff046b774275bafff32fdd4ebe6f69))
+
 ## [3.1.2](https://github.com/ExaDev/semantic-release-workspace/compare/v3.1.1...v3.1.2) (2026-09-21)
 
+### Build System
+
+* **deps-dev:** bump typescript-eslint from 8.69.0 to 8.70.0 ([bf80c0a](https://github.com/ExaDev/semantic-release-workspace/commit/bf80c0a3fd76c6a7a95f1bf0ce6ff4478e28177c))
+
 ## [3.1.1](https://github.com/ExaDev/semantic-release-workspace/compare/v3.1.0...v3.1.1) (2026-09-21)
+
+### Build System
+
+* **deps:** bump yaml from 2.9.0 to 2.9.1 ([6f9e0b4](https://github.com/ExaDev/semantic-release-workspace/commit/6f9e0b4cb7a92781b3e517e95225a7697b3d5a06))
 
 # [3.1.0](https://github.com/ExaDev/semantic-release-workspace/compare/v3.0.3...v3.1.0) (2026-09-20)
 
@@ -109,6 +285,10 @@
 * **cli:** accept tagFormat as a --tag-format flag and a config file key ([2ad97f4](https://github.com/ExaDev/semantic-release-workspace/commit/2ad97f49f8135b4e356dd72085d7a204811a05be))
 
 ## [3.0.3](https://github.com/ExaDev/semantic-release-workspace/compare/v3.0.2...v3.0.3) (2026-09-20)
+
+### Tests
+
+* cover the branch-move bound directly instead of by construction ([170b41d](https://github.com/ExaDev/semantic-release-workspace/commit/170b41d864f78ffb05e2528f40f65e9c6267290b))
 
 ## [3.0.2](https://github.com/ExaDev/semantic-release-workspace/compare/v3.0.1...v3.0.2) (2026-09-20)
 
@@ -163,6 +343,10 @@ and TypeScript config files may no longer use non-erasable syntax such as enum o
 
 ## [1.3.8](https://github.com/ExaDev/semantic-release-workspace/compare/v1.3.7...v1.3.8) (2026-09-19)
 
+### Build System
+
+* turn off minimumReleaseAgeStrict so Dependabot's pnpm update can run ([53795ef](https://github.com/ExaDev/semantic-release-workspace/commit/53795ef1cc993dc17f45d98b13ac337105ddce42))
+
 ## [1.3.7](https://github.com/ExaDev/semantic-release-workspace/compare/v1.3.6...v1.3.7) (2026-09-19)
 
 
@@ -182,13 +366,33 @@ and TypeScript config files may no longer use non-erasable syntax such as enum o
 
 ## [1.3.5](https://github.com/ExaDev/semantic-release-workspace/compare/v1.3.4...v1.3.5) (2026-09-14)
 
+### Build System
+
+* **deps-dev:** bump lint-staged from 17.4.1 to 17.5.0 ([ebbd465](https://github.com/ExaDev/semantic-release-workspace/commit/ebbd465a4d4442e32bec11dc1b981406c5f606d5))
+
 ## [1.3.4](https://github.com/ExaDev/semantic-release-workspace/compare/v1.3.3...v1.3.4) (2026-09-14)
+
+### Build System
+
+* **deps-dev:** bump eslint from 10.9.1 to 10.10.0 ([3a501bc](https://github.com/ExaDev/semantic-release-workspace/commit/3a501bcaaa28e2bb90fa0be0a1a8b47dd0325106))
 
 ## [1.3.3](https://github.com/ExaDev/semantic-release-workspace/compare/v1.3.2...v1.3.3) (2026-09-11)
 
+### Build System
+
+* **deps-dev:** bump tsdown from 0.22.14 to 0.23.0 ([e2108af](https://github.com/ExaDev/semantic-release-workspace/commit/e2108aff9aa5155538f39c1aa3264681401d94cd))
+
 ## [1.3.2](https://github.com/ExaDev/semantic-release-workspace/compare/v1.3.1...v1.3.2) (2026-09-09)
 
+### Build System
+
+* **deps-dev:** bump @types/node from 26.4.0 to 26.4.1 ([83ec5ee](https://github.com/ExaDev/semantic-release-workspace/commit/83ec5ee110cd4f8a391c298fb94d0241a7232e2f))
+
 ## [1.3.1](https://github.com/ExaDev/semantic-release-workspace/compare/v1.3.0...v1.3.1) (2026-09-09)
+
+### Build System
+
+* **deps-dev:** bump globals from 17.11.0 to 17.12.0 ([b050b6c](https://github.com/ExaDev/semantic-release-workspace/commit/b050b6c82cf5fc5282aa484e382311b1488e7d7e))
 
 # [1.3.0](https://github.com/ExaDev/semantic-release-workspace/compare/v1.2.4...v1.3.0) (2026-09-08)
 
@@ -199,6 +403,10 @@ and TypeScript config files may no longer use non-erasable syntax such as enum o
 
 ## [1.2.4](https://github.com/ExaDev/semantic-release-workspace/compare/v1.2.3...v1.2.4) (2026-09-08)
 
+### Build System
+
+* **deps-dev:** bump typescript-eslint from 8.68.0 to 8.69.0 ([bff5389](https://github.com/ExaDev/semantic-release-workspace/commit/bff5389c557564dab63d89c839695769b8827d11))
+
 ## [1.2.3](https://github.com/ExaDev/semantic-release-workspace/compare/v1.2.2...v1.2.3) (2026-09-06)
 
 
@@ -208,7 +416,15 @@ and TypeScript config files may no longer use non-erasable syntax such as enum o
 
 ## [1.2.2](https://github.com/ExaDev/semantic-release-workspace/compare/v1.2.1...v1.2.2) (2026-09-04)
 
+### Build System
+
+* **deps-dev:** bump lint-staged from 17.3.0 to 17.4.1 ([84acf92](https://github.com/ExaDev/semantic-release-workspace/commit/84acf929ac142e195b7194e5a2edaf527a458d65))
+
 ## [1.2.1](https://github.com/ExaDev/semantic-release-workspace/compare/v1.2.0...v1.2.1) (2026-09-03)
+
+### Build System
+
+* **deps-dev:** bump @types/node from 26.3.0 to 26.4.0 ([4ee86af](https://github.com/ExaDev/semantic-release-workspace/commit/4ee86afc655387dff1719a094b20dfb52f7d4f29))
 
 # [1.2.0](https://github.com/ExaDev/semantic-release-workspace/compare/v1.1.7...v1.2.0) (2026-09-02)
 
@@ -228,17 +444,45 @@ and TypeScript config files may no longer use non-erasable syntax such as enum o
 
 ## [1.1.7](https://github.com/ExaDev/semantic-release-workspace/compare/v1.1.6...v1.1.7) (2026-09-02)
 
+### Build System
+
+* **deps-dev:** bump turbo from 2.10.11 to 2.10.12 ([02723c9](https://github.com/ExaDev/semantic-release-workspace/commit/02723c94470378a87298e678d967589475d4025b))
+
 ## [1.1.6](https://github.com/ExaDev/semantic-release-workspace/compare/v1.1.5...v1.1.6) (2026-09-01)
+
+### Build System
+
+* **deps-dev:** bump @types/node from 26.2.0 to 26.3.0 ([c8bd15d](https://github.com/ExaDev/semantic-release-workspace/commit/c8bd15d8e92316485f106c817ea4b258c9dfd7a6))
 
 ## [1.1.5](https://github.com/ExaDev/semantic-release-workspace/compare/v1.1.4...v1.1.5) (2026-09-01)
 
+### Build System
+
+* **deps-dev:** bump eslint from 10.9.0 to 10.9.1 ([7ac6765](https://github.com/ExaDev/semantic-release-workspace/commit/7ac6765276b62dca7f556bda3563636bf6cec977))
+
 ## [1.1.4](https://github.com/ExaDev/semantic-release-workspace/compare/v1.1.3...v1.1.4) (2026-09-01)
+
+### Build System
+
+* **deps-dev:** bump typescript-eslint from 8.67.0 to 8.68.0 ([248852c](https://github.com/ExaDev/semantic-release-workspace/commit/248852c291f4791ef21374c2133c4d7118093ceb))
 
 ## [1.1.3](https://github.com/ExaDev/semantic-release-workspace/compare/v1.1.2...v1.1.3) (2026-09-01)
 
+### Build System
+
+* **deps-dev:** bump @exadev/eslint-config from 2.1.1 to 2.1.2 ([1d3777c](https://github.com/ExaDev/semantic-release-workspace/commit/1d3777c786e8ab611b599e00465a1ca84c1ed85a))
+
 ## [1.1.2](https://github.com/ExaDev/semantic-release-workspace/compare/v1.1.1...v1.1.2) (2026-08-31)
 
+### Build System
+
+* **deps-dev:** bump eslint from 10.8.1 to 10.9.0 ([c8cffbb](https://github.com/ExaDev/semantic-release-workspace/commit/c8cffbb527d2819db03ca986bcefbcbbf0aff4f7))
+
 ## [1.1.1](https://github.com/ExaDev/semantic-release-workspace/compare/v1.1.0...v1.1.1) (2026-08-27)
+
+### Build System
+
+* **deps-dev:** bump publint from 0.3.23 to 0.3.24 ([b3642b4](https://github.com/ExaDev/semantic-release-workspace/commit/b3642b45179f7c1451e2d26f4cbb3295e00435b6))
 
 # [1.1.0](https://github.com/ExaDev/semantic-release-workspace/compare/v1.0.3...v1.1.0) (2026-08-24)
 
