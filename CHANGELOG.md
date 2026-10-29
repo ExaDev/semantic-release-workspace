@@ -1,3 +1,13 @@
+## [3.2.16](https://github.com/ExaDev/semantic-release-workspace/compare/v3.2.15...v3.2.16) (2026-10-29)
+
+### Bug Fixes
+
+* list every commit type in the release notes ([164c9f4](https://github.com/ExaDev/semantic-release-workspace/commit/164c9f4d2a351149f2a85118702f225b6208a083))
+
+### Documentation
+
+* list the commits behind each release that had an empty changelog entry ([e326e13](https://github.com/ExaDev/semantic-release-workspace/commit/e326e13fde555e5f586f959cffe0ead80b81a294))
+
 ## [3.2.15](https://github.com/ExaDev/semantic-release-workspace/compare/v3.2.14...v3.2.15) (2026-10-28)
 
 ### Build System
