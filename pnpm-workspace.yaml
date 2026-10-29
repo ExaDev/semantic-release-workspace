@@ -10,3 +10,8 @@ minimumReleaseAgeExclude:
   - '@exadev/*'
 # Every future `pnpm add` records the exact resolved version rather than a caret range, matching how @exadev/eslint-config itself is pinned in this repo's own package.json.
 saveExact: true
+# @semantic-release/release-notes-generator resolves its preset by importing it from its own directory before the project's, and pnpm gives that directory only its declared dependencies plus the hoisted copy of each package, which here is 10.x (via @commitlint/config-conventional). 10.x needs conventional-changelog-writer 9, while this generator loads writer 8, so 10.x renders no notes. Declaring the pinned 9.x as its dependency makes the copy it imports first the one this repository's devDependency pins, matching what npm's flat node_modules gives.
+packageExtensions:
+  '@semantic-release/release-notes-generator':
+    dependencies:
+      conventional-changelog-conventionalcommits: 9.3.1

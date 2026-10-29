@@ -362,7 +362,9 @@ pnpm run build        # tsdown: dist/ library + bin
 pnpm run test:smoke   # rebuilds, then spawns the real dist/cli.js as a subprocess
 ```
 
-Conventional commits, enforced by commitlint; releases of this package itself go through semantic-release on `main`.
+Conventional commits, enforced by commitlint; releases of this package itself go through semantic-release on `main`. This package's own release uses the stock plugins, not the orchestrator. `commitTypes` in `release.config.ts` is the one list of accepted commit types, their release levels and their release-notes sections, and commitlint, commit-analyzer and the notes generator all derive from it, so every type that can cut a release is listed in its notes. The notes use the `conventionalcommits` preset pinned to 9.x, because `@semantic-release/release-notes-generator` loads `conventional-changelog-writer` 8 and the 10.x preset renders no notes with it; the pnpm `packageExtensions` entry in `pnpm-workspace.yaml` makes the generator import that pinned copy rather than the hoisted 10.x one.
+
+The same applies to a workspace released through the orchestrator: pass `--generate-notes` (or `generateNotes` in the config file) `{"preset":"conventionalcommits","presetConfig":{"types":[...]}}` listing every type the analyzer releases on, or a release cut by a type the notes omit gets a bare version header.
 
 ## License
 

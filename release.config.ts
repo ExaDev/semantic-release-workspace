@@ -5,25 +5,27 @@ type ReleaseLevel = 'major' | 'minor' | 'patch' | false;
 interface CommitType {
   readonly type: string;
   readonly release: ReleaseLevel;
+  /** The heading this type's commits are listed under in the release notes and CHANGELOG.md. */
+  readonly section: string;
 }
 
 /**
- * Single source of truth for the conventional-commit types this project uses. commitlint's allowed type-enum (commitlint.config.ts imports this) and commit-analyzer's releaseRules below both derive from it, so a type can't trigger a release without also being accepted by commit-msg validation, or the reverse.
+ * Single source of truth for the conventional-commit types this project uses. commitlint's allowed type-enum (commitlint.config.ts imports this) and commit-analyzer's releaseRules below both derive from it, so a type can't trigger a release without also being accepted by commit-msg validation, or the reverse. The release notes' `presetConfig.types` derives from it too, so every type listed here appears in the notes and a release is never cut by a commit its own notes omit.
  *
  * Defined here rather than in a shared commit-types.ts: semantic-release loads this file via cosmiconfig, which transpiles only this one file to ESM, so a sibling .ts module would not resolve. commitlint's jiti loader has no such limit, so it imports commitTypes from here.
  */
 export const commitTypes: readonly CommitType[] = [
-  { type: 'feat', release: 'minor' },
-  { type: 'fix', release: 'patch' },
-  { type: 'perf', release: 'patch' },
-  { type: 'revert', release: 'patch' },
-  { type: 'refactor', release: 'patch' },
-  { type: 'docs', release: 'patch' },
-  { type: 'style', release: 'patch' },
-  { type: 'test', release: 'patch' },
-  { type: 'build', release: 'patch' },
-  { type: 'ci', release: 'patch' },
-  { type: 'chore', release: 'patch' },
+  { type: 'feat', release: 'minor', section: 'Features' },
+  { type: 'fix', release: 'patch', section: 'Bug Fixes' },
+  { type: 'perf', release: 'patch', section: 'Performance Improvements' },
+  { type: 'revert', release: 'patch', section: 'Reverts' },
+  { type: 'refactor', release: 'patch', section: 'Code Refactoring' },
+  { type: 'docs', release: 'patch', section: 'Documentation' },
+  { type: 'style', release: 'patch', section: 'Styles' },
+  { type: 'test', release: 'patch', section: 'Tests' },
+  { type: 'build', release: 'patch', section: 'Build System' },
+  { type: 'ci', release: 'patch', section: 'Continuous Integration' },
+  { type: 'chore', release: 'patch', section: 'Chores' },
 ];
 
 /**
@@ -42,8 +44,9 @@ const config: Options = {
     [
       '@semantic-release/release-notes-generator',
       {
-        // Deliberately angular, not conventionalcommits -- matches the family's identical precedent (see documents.js/ooxml.js's own release.config.ts): conventional-changelog-writer's bundled commit partial doesn't match the conventionalcommits preset's function-based partial signature, producing a changelog with a version header and nothing under it. commitTypes still drives commit-analyzer's releaseRules and commitlint's type-enum regardless of which changelog preset is used.
-        preset: 'angular',
+        // conventional-changelog-conventionalcommits is a direct devDependency pinned to 9.x, not left to resolve through @commitlint/config-conventional: release-notes-generator loads conventional-changelog-writer 8, and the 10.x preset needs writer 9, so it renders a version header with nothing under it. With 9.x, presetConfig.types lists every type in commitTypes under its section, which the angular preset cannot (it lists only feat, fix, perf and revert, so a release cut by a docs, refactor, ci or chore commit had a version header and nothing under it).
+        preset: 'conventionalcommits',
+        presetConfig: { types: commitTypes.map((t) => ({ type: t.type, section: t.section })) },
       },
     ],
     '@semantic-release/changelog',
