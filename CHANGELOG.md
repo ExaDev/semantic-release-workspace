@@ -1,3 +1,9 @@
+## [3.2.17](https://github.com/ExaDev/semantic-release-workspace/compare/v3.2.16...v3.2.17) (2026-11-02)
+
+### Build System
+
+* **deps-dev:** bump tsdown from 0.23.1 to 0.23.2 ([e7544ca](https://github.com/ExaDev/semantic-release-workspace/commit/e7544ca315636b7f4c05cdb883ee657bc48c0438))
+
 ## [3.2.16](https://github.com/ExaDev/semantic-release-workspace/compare/v3.2.15...v3.2.16) (2026-10-29)
 
 ### Bug Fixes
