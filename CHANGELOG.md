@@ -1,3 +1,9 @@
+## [3.2.20](https://github.com/ExaDev/semantic-release-workspace/compare/v3.2.19...v3.2.20) (2026-11-05)
+
+### Build System
+
+* **deps-dev:** bump @types/node from 26.6.5 to 26.6.6 ([efb4e42](https://github.com/ExaDev/semantic-release-workspace/commit/efb4e42840d249f54b5a03a02fb804d2f244a219))
+
 ## [3.2.19](https://github.com/ExaDev/semantic-release-workspace/compare/v3.2.18...v3.2.19) (2026-11-05)
 
 ### Build System
