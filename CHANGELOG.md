@@ -1,3 +1,9 @@
+## [3.2.21](https://github.com/ExaDev/semantic-release-workspace/compare/v3.2.20...v3.2.21) (2026-11-06)
+
+### Build System
+
+* **deps:** bump @exadev/release-gate from 1.0.3 to 1.0.4 ([507c47a](https://github.com/ExaDev/semantic-release-workspace/commit/507c47aabd012d1371321d2f71875f4708e3bad3))
+
 ## [3.2.20](https://github.com/ExaDev/semantic-release-workspace/compare/v3.2.19...v3.2.20) (2026-11-05)
 
 ### Build System
