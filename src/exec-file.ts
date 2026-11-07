@@ -26,3 +26,32 @@ export async function execFile(command: string, args: readonly string[], options
     });
   });
 }
+
+/** A finished command's exit code and output. */
+export interface CommandResult {
+  readonly exitCode: number;
+  readonly stdout: string;
+  readonly stderr: string;
+}
+
+/** Runs a command and resolves with its exit code and output whatever the exit code, for a caller that reads its answer from a failing exit too (`npm view` reports a missing version as an error). */
+export type CommandRunner = (command: string, args: readonly string[], options: ExecFileOptions) => Promise<CommandResult>;
+
+/**
+ * The real `CommandRunner`. Rejects only when the command produced no exit code at all (it could not be started, or a signal killed it), since then there is no answer to read.
+ */
+export async function runCommand(command: string, args: readonly string[], options: ExecFileOptions): Promise<CommandResult> {
+  return new Promise((resolve, reject) => {
+    execFileCallback(command, [...args], { cwd: options.cwd, env: options.env, maxBuffer: options.maxBuffer }, (error: ExecException | null, stdout: string, stderr: string) => {
+      if (error === null) {
+        resolve({ exitCode: 0, stdout, stderr });
+        return;
+      }
+      if (typeof error.code === 'number') {
+        resolve({ exitCode: error.code, stdout, stderr });
+        return;
+      }
+      reject(error instanceof Error ? error : new Error(error.message));
+    });
+  });
+}
