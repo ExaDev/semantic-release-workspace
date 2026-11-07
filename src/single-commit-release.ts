@@ -1,5 +1,4 @@
 import { resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
 import semanticRelease from 'semantic-release';
 import type { AnalyzeCommitsContext, BranchObject, BranchSpec, Commit, Options, ReleaseType } from 'semantic-release';
 import { GitCommandError, ReleaseConfigurationError, WorkspaceStateError } from './errors';
@@ -22,6 +21,7 @@ import { type BundledDependencies, resolveBundledDependencies } from './bundling
 import { buildDependencyGraph, mustGet, orderedPackages, topologicalOrder, validateDependencyRanges, type DependencyGraph } from './graph';
 import { writeDependencyRange } from './manifest';
 import { packageName } from './package-name';
+import { channelOrNull, createPluginLogger, loadReleasePlugin, type LoadedReleasePlugin, type PluginCallContext } from './plugin-lifecycle';
 import { createScopedPlugins, resolveWorkspacePublishPlugins, SINGLE_COMMIT_DEFAULT_PUBLISH_PLUGINS, type ResolvedPublishPlugin } from './plugins';
 import { regenerateLockfile } from './pnpm';
 import { DEFAULT_PUSH_ATTEMPTS, type AppliedDependencyBump, type PackageReleaseOutcome, type ReleaseWorkspaceOptions, type WorkspaceReleaseOutcome } from './release';
@@ -395,34 +395,6 @@ function describeCombinedCommit(planned: readonly PlannedPackageRelease[]): stri
   return ['chore(release): batch release [skip ci]', '', ...lines].join('\n');
 }
 
-/** The subset of a semantic-release plugin context this mode's own hand-built calls actually construct and pass, covering exactly the fields the `verifyConditions`/`prepare`/`publish`/`success` steps of `@semantic-release/changelog`, `@semantic-release/npm`, and `@semantic-release/github` read (confirmed by reading each plugin's own source) -- not the full upstream `VerifyReleaseContext` shape, most of which (`envCi`, `branches` plural, `lastRelease`) none of those steps consult. */
-interface PluginCallContext {
-  readonly cwd: string;
-  readonly env: NodeJS.ProcessEnv;
-  readonly stdout: NodeJS.WriteStream;
-  readonly stderr: NodeJS.WriteStream;
-  readonly logger: PluginLogger;
-  readonly options: { readonly repositoryUrl: string };
-  readonly branch: BranchObject;
-  readonly commits: readonly Commit[];
-  readonly releases: readonly unknown[];
-  readonly nextRelease: {
-    readonly type: ReleaseType;
-    readonly version: string;
-    readonly gitTag: string;
-    readonly name: string;
-    readonly notes: string;
-    readonly channel: string | null;
-  };
-}
-
-interface PluginLogger {
-  readonly log: (...args: readonly unknown[]) => void;
-  readonly warn: (...args: readonly unknown[]) => void;
-  readonly error: (...args: readonly unknown[]) => void;
-  readonly success: (...args: readonly unknown[]) => void;
-}
-
 interface SharedRunContext {
   readonly env: NodeJS.ProcessEnv;
   readonly branch: BranchObject;
@@ -436,18 +408,12 @@ function buildPluginContext(
   capturedCommits: ReadonlyMap<string, readonly Commit[]>,
   releases: readonly unknown[],
 ): PluginCallContext {
-  const logger: PluginLogger = {
-    log: (...args) => { shared.log(`[${release.pkg.name}] ${args.map(String).join(' ')}`); },
-    warn: (...args) => { shared.log(`[${release.pkg.name}] warn: ${args.map(String).join(' ')}`); },
-    error: (...args) => { shared.log(`[${release.pkg.name}] error: ${args.map(String).join(' ')}`); },
-    success: (...args) => { shared.log(`[${release.pkg.name}] ${args.map(String).join(' ')}`); },
-  };
   return {
     cwd: release.pkg.directory,
     env: { ...shared.env },
     stdout: process.stdout,
     stderr: process.stderr,
-    logger,
+    logger: createPluginLogger(release.pkg.name, shared.log),
     options: { repositoryUrl: shared.repositoryUrl },
     branch: shared.branch,
     commits: capturedCommits.get(release.pkg.name) ?? [],
@@ -461,58 +427,4 @@ function buildPluginContext(
       channel: channelOrNull(shared.branch.channel),
     },
   };
-}
-
-/** Matches semantic-release's own core exactly (`context.branch.channel || null` in its `index.js`): a branch's `channel` is `string | false | undefined`, and any falsy value (including `false` and an empty string) means "the default channel", represented here as `null`. Written as explicit comparisons rather than `||`/`??` so the falsy-to-null collapse (deliberately including `false` and `''`, which `??` alone would not fold) reads as intentional rather than as a fallback for `undefined`/`null` alone. */
-function channelOrNull(channel: string | false | undefined): string | null {
-  return channel === undefined || channel === false || channel === '' ? null : channel;
-}
-
-type ReleaseLifecycleFn = (pluginConfig: Record<string, unknown>, context: PluginCallContext) => Promise<unknown>;
-
-/** The shape of a dynamically-imported publish-plugin module, as far as `commitStrategy: 'single'` calls it directly: whichever of these four named exports it happens to define (the same generic, plugin-agnostic dispatch semantic-release's own core uses -- it does not hardcode which named plugin defines which step either). */
-interface LoadedReleasePlugin {
-  readonly verifyConditions?: ReleaseLifecycleFn;
-  readonly prepare?: ReleaseLifecycleFn;
-  readonly publish?: ReleaseLifecycleFn;
-  readonly success?: ReleaseLifecycleFn;
-}
-
-function isReleaseLifecycleFnOrUndefined(value: unknown): value is ReleaseLifecycleFn | undefined {
-  return value === undefined || typeof value === 'function';
-}
-
-function isReleasePluginModule(value: unknown): value is LoadedReleasePlugin {
-  if (typeof value !== 'object' || value === null) {
-    return false;
-  }
-  if ('verifyConditions' in value && !isReleaseLifecycleFnOrUndefined(value.verifyConditions)) {
-    return false;
-  }
-  if ('prepare' in value && !isReleaseLifecycleFnOrUndefined(value.prepare)) {
-    return false;
-  }
-  if ('publish' in value && !isReleaseLifecycleFnOrUndefined(value.publish)) {
-    return false;
-  }
-  if ('success' in value && !isReleaseLifecycleFnOrUndefined(value.success)) {
-    return false;
-  }
-  return true;
-}
-
-/** Loads a publish plugin module directly (bypassing semantic-release's own step-pipeline machinery, since phase 5 cannot go through it -- see this file's own top-of-file note), caching by resolved path so a plugin shared by several packages is imported once per run rather than once per package per phase. */
-async function loadReleasePlugin(absolutePath: string, cache: Map<string, LoadedReleasePlugin>): Promise<LoadedReleasePlugin> {
-  const cached = cache.get(absolutePath);
-  if (cached !== undefined) {
-    return cached;
-  }
-  const loaded: unknown = await import(pathToFileURL(absolutePath).href);
-  if (!isReleasePluginModule(loaded)) {
-    throw new ReleaseConfigurationError(
-      `The publish plugin resolved to ${absolutePath} does not export a recognised semantic-release plugin interface (verifyConditions/prepare/publish/success functions), so commitStrategy "single" cannot call its lifecycle steps directly.`,
-    );
-  }
-  cache.set(absolutePath, loaded);
-  return loaded;
 }
