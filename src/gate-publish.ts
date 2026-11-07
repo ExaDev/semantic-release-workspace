@@ -170,6 +170,8 @@ export interface ResumeWorkspaceReleaseOptions {
   /** `WorkspaceReleaseOutcome.detached` from the earlier `releaseWorkspace({gatePublish: true})` call this resumes. */
   readonly detached: readonly DetachedPackageRelease[];
   readonly log?: (message: string) => void;
+  /** Called as each package's release is published; see `ReleaseWorkspaceOptions.onPublished`. */
+  readonly onPublished?: ReleaseWorkspaceOptions['onPublished'];
 }
 
 /**
@@ -213,6 +215,7 @@ export async function resumeWorkspaceRelease(options: ResumeWorkspaceReleaseOpti
       throw new WorkspaceReleaseError(`Resuming ${entry.name} failed: ${cause instanceof Error ? cause.message : String(cause)}`);
     }
     log(`${entry.name}: published ${entry.state.nextRelease.gitTag} (${String(releases.length)} publish plugin${releases.length === 1 ? '' : 's'} ran)`);
+    options.onPublished?.({ name: entry.name, version: entry.state.nextRelease.version, gitTag: entry.state.nextRelease.gitTag });
 
     packages.push({
       name: entry.name,

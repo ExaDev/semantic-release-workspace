@@ -17,6 +17,8 @@ export interface FixturePackage {
   readonly devDependencies?: Readonly<Record<string, string>>;
   /** Whether the manifest is marked `private`. Defaults to `true`, so a fixture package never reaches a real registry whatever the publish plugins are configured to do; set it to `false` for a test that needs a package the orchestrator treats as publishable. */
   readonly private?: boolean;
+  /** The manifest's `publishConfig`, for a test that needs the registry a publishable package publishes to. */
+  readonly publishConfig?: Readonly<Record<string, unknown>>;
   /** Directory name under `packages/`, when it needs to differ from the package name's own unscoped form -- for example a real npm name paired with a directory that has a space or a non-ASCII character in it, which a valid npm name can never contain itself. Defaults to the unscoped package name. */
   readonly directory?: string;
 }
@@ -81,6 +83,7 @@ export async function createWorkspaceFixture(
           type: 'module',
           ...(pkg.dependencies === undefined ? {} : { dependencies: pkg.dependencies }),
           ...(pkg.devDependencies === undefined ? {} : { devDependencies: pkg.devDependencies }),
+          ...(pkg.publishConfig === undefined ? {} : { publishConfig: pkg.publishConfig }),
         },
         null,
         2,
