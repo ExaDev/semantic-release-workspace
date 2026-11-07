@@ -1,1 +1,1 @@
-export {};
+export const a = 2;
