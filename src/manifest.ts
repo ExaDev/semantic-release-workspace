@@ -22,6 +22,8 @@ export interface PackageManifest {
   readonly private: boolean;
   /** Only the fields actually present in the file, each mapping dependency name to its declared range. */
   readonly dependencies: ReadonlyMap<DependencyField, ReadonlyMap<string, string>>;
+  /** `publishConfig.registry`, which `@semantic-release/npm` publishes to ahead of any configured registry; `undefined` when the manifest names none, and the package then publishes to whichever registry npm's own configuration resolves. */
+  readonly publishRegistry: string | undefined;
 }
 
 export async function readManifest(path: string): Promise<PackageManifest> {
@@ -56,7 +58,10 @@ export async function readManifest(path: string): Promise<PackageManifest> {
     dependencies.set(field, new Map(Object.entries(declared)));
   }
 
-  return { name, version, private: parsed.private === true, dependencies };
+  const { publishConfig } = parsed;
+  const publishRegistry = isJsonObject(publishConfig) && typeof publishConfig.registry === 'string' ? publishConfig.registry : undefined;
+
+  return { name, version, private: parsed.private === true, dependencies, publishRegistry };
 }
 
 /**

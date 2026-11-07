@@ -46,4 +46,11 @@ describe('readManifest', () => {
     await expect(readManifest(await temporaryManifest({ name: 'a', version: '1.0.0', private: 'true' }))).resolves.toMatchObject({ private: false });
     await expect(readManifest(await temporaryManifest({ name: 'a', version: '1.0.0' }))).resolves.toMatchObject({ private: false });
   });
+
+  /** `@semantic-release/npm` publishes to `publishConfig.registry` ahead of any configured registry, so a lookup of what the package has published has to ask the same one. */
+  it('reads the registry the package publishes to from publishConfig, when it names one', async () => {
+    await expect(readManifest(await temporaryManifest({ name: 'a', version: '1.0.0', publishConfig: { registry: 'https://npm.example.com/' } }))).resolves.toMatchObject({ publishRegistry: 'https://npm.example.com/' });
+    await expect(readManifest(await temporaryManifest({ name: 'a', version: '1.0.0', publishConfig: { access: 'public' } }))).resolves.toMatchObject({ publishRegistry: undefined });
+    await expect(readManifest(await temporaryManifest({ name: 'a', version: '1.0.0' }))).resolves.toMatchObject({ publishRegistry: undefined });
+  });
 });
