@@ -1,8 +1,8 @@
 import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
 import { analyzeCommits } from '@semantic-release/commit-analyzer';
-import { generateNotes } from '@semantic-release/release-notes-generator';
-import type { AnalyzeCommitsContext, Commit, GenerateNotesContext, ReleaseType } from 'semantic-release';
+import { generateNotes, type GenerateNotesInput } from '@semantic-release/release-notes-generator';
+import type { AnalyzeCommitsContext, Commit, ReleaseType } from 'semantic-release';
 import { type BundledDependencies } from './bundling';
 import { packageName } from './package-name';
 import { parseDependencyBumpTrailer } from './dependency-bump-commit';
@@ -73,7 +73,7 @@ const STEP_PLUGINS_THE_ORCHESTRATOR_OWNS: ReadonlySet<string> = new Set(['@seman
 
 export interface ScopedPlugins {
   readonly analyzeCommits: (pluginConfig: Record<string, unknown>, context: AnalyzeCommitsContext & { cwd: string }) => Promise<string | false | undefined>;
-  readonly generateNotes: (pluginConfig: Record<string, unknown>, context: GenerateNotesContext & { cwd: string }) => Promise<string | false | undefined>;
+  readonly generateNotes: (pluginConfig: Record<string, unknown>, context: GenerateNotesInput & { cwd: string }) => Promise<string | false | undefined>;
   /**
    * The release type the package's released code carries to whatever bundles it: the highest of `releaseType` (the type the package itself released as) and the release types of the bumps it carries (`BundledDependencies.carried`) from the most recent `analyzeCommits` call. A carried bump with no recorded type counts as a patch. `releaseType` is the type semantic-release released the package as.
    */
@@ -102,7 +102,7 @@ export function createScopedPlugins(scope: {
   // The highest release type among the carried bumps the most recent analysis saw, read back by `shippedReleaseType` once semantic-release has decided the package's own type.
   let carriedReleaseType: ReleaseType | undefined;
 
-  async function commitsForPackage(context: AnalyzeCommitsContext & { cwd: string }): Promise<readonly Commit[]> {
+  async function commitsForPackage(context: Pick<AnalyzeCommitsContext, 'commits'> & { readonly lastRelease: unknown; readonly cwd: string }): Promise<readonly Commit[]> {
     // A lastRelease with no gitHead means semantic-release fetched the package's whole history, so the path map is built over the same unbounded range.
     const from = hasGitHead(context.lastRelease) ? context.lastRelease.gitHead : undefined;
     // Two branches, not `cached === undefined || cached.from !== from`: when this is the very first call for a package with no prior release, both `cached` and `from` are `undefined`, and a single optional-chained comparison cannot distinguish "nothing cached yet" from "cached, and it happens to match".
@@ -302,6 +302,21 @@ export function resolveWorkspacePublishPlugins(
   const forPrivatePackages = privateSpecs.length === specs.plugins.length ? workspaceWide : resolvePublishPlugins(privateSpecs, workspaceRoot, options);
 
   return new Map(packages.map((pkg) => [pkg.name, resolvedOverrides.get(pkg.name) ?? (pkg.private ? forPrivatePackages : workspaceWide)]));
+}
+
+/** The publish plugin that puts a release on a registry. */
+export const REGISTRY_PUBLISH_PLUGIN = '@semantic-release/npm';
+
+/**
+ * Where in `plugins` (one package's resolved publish list) the registry publish happens, or `undefined` when the package never reaches a registry: it is private, its list has no `@semantic-release/npm`, or that entry sets `npmPublish: false`. The same rule `@semantic-release/npm` applies before it publishes (`npmPublish !== false && pkg.private !== true`), so this is the package's publishing intent as its own release would act on it.
+ */
+export function registryPublishStep(pkg: PublishPluginPackage, plugins: readonly ResolvedPublishPlugin[], workspaceRoot: string): number | undefined {
+  if (pkg.private) {
+    return undefined;
+  }
+  const registryPlugin = resolvePluginModule(REGISTRY_PUBLISH_PLUGIN, createRequire(import.meta.url), createRequire(resolve(workspaceRoot, 'package.json')));
+  const index = plugins.findIndex(([path, config]) => path === registryPlugin && config.npmPublish !== false);
+  return index === -1 ? undefined : index;
 }
 
 /**
