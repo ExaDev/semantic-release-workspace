@@ -49,3 +49,32 @@ export class PnpmCommandError extends WorkspaceReleaseError {
     super(`pnpm install --lockfile-only failed in ${cwd}: ${detail}`);
   }
 }
+
+/** A registry lookup this package makes itself (whether a released version is already published) failed for a reason other than the version being absent, so whether the release still needs publishing is unknown. */
+export class RegistryQueryError extends WorkspaceReleaseError {}
+
+/** One tagged release a recovery pass could not publish, with the reason. */
+export interface UnrecoveredRelease {
+  readonly name: string;
+  readonly gitTag: string;
+  readonly reason: string;
+}
+
+/**
+ * At least one release tag whose version is missing from its registry could not be published. `failed` lists the releases whose publish failed, `blocked` the releases that were not attempted because a workspace package they depend on is in `failed`, and `recovered` the releases this pass did publish before stopping. Nothing new is released after this error, so the next run retries the same recovery first.
+ */
+export class UnpublishedReleaseRecoveryError extends WorkspaceReleaseError {
+  readonly failed: readonly UnrecoveredRelease[];
+  readonly blocked: readonly UnrecoveredRelease[];
+  readonly recovered: readonly { readonly name: string; readonly version: string; readonly gitTag: string }[];
+
+  constructor(failed: readonly UnrecoveredRelease[], blocked: readonly UnrecoveredRelease[], recovered: UnpublishedReleaseRecoveryError['recovered']) {
+    const lines = [...failed.map((release) => `- ${release.gitTag}: ${release.reason}`), ...blocked.map((release) => `- ${release.gitTag}: ${release.reason}`)];
+    super(
+      `${String(failed.length)} release tag(s) whose version is missing from the registry could not be published, so nothing new was released and the next run retries them first:\n${lines.join('\n')}`,
+    );
+    this.failed = failed;
+    this.blocked = blocked;
+    this.recovered = recovered;
+  }
+}
