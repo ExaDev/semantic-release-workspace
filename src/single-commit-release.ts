@@ -280,6 +280,7 @@ async function attemptSingleCommitRelease(options: ReleaseWorkspaceOptions): Pro
           }
         }
         log(`${release.pkg.name}: published ${release.gitTag}`);
+        options.onPublished?.({ name: release.pkg.name, version: release.version, gitTag: release.gitTag });
       }
     },
   };

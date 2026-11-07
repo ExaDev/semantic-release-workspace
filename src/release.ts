@@ -5,13 +5,15 @@ import { type BundledDependencies, resolveBundledDependencies } from './bundling
 import { formatDependencyBumpMessage } from './dependency-bump-commit';
 import { releasePackageAcrossBranchMoves, type BranchTracker } from './branch-integration';
 import { ReleaseConfigurationError, WorkspaceReleaseError, WorkspaceStateError } from './errors';
-import { commitFiles, currentBranch, fastForwardTo, fetchBranchTip, isAncestor, pushHead, resolveCommitIdentity, sanitizeGitEnv, type CommitIdentity } from './git';
+import { commitFiles, currentBranch, fastForwardTo, fetchBranchTip, git, isAncestor, pushHead, resolveCommitIdentity, sanitizeGitEnv, type CommitIdentity } from './git';
 import { buildDependencyGraph, mustGet, orderedPackages, topologicalOrder, validateDependencyRanges, type DependencyGraph } from './graph';
 import { packageName } from './package-name';
 import {
   type DependencyBump,
   DEFAULT_PUBLISH_PLUGINS,
+  registryPublishStep,
   resolveWorkspacePublishPlugins,
+  SINGLE_COMMIT_DEFAULT_PUBLISH_PLUGINS,
   type PackagePluginSpecs,
   type PublishPluginSpec,
   type ResolvedPublishPlugin,
@@ -19,6 +21,10 @@ import {
 } from './plugins';
 import { type DependencyField, writeDependencyRange } from './manifest';
 import { regenerateLockfile } from './pnpm';
+import { createNpmRegistryClient } from './npm-registry';
+import { createTaggedCommitPublisher } from './recovery-publisher';
+import { recoverUnpublishedReleases, type RecoveryPublisher, type RegistryClient, type TaggedRelease } from './registry-recovery';
+import { createGitReleasedTagSource } from './released-tags';
 import { updateDependencyRange } from './version-range';
 import { discoverWorkspace, type Workspace, type WorkspacePackage } from './workspace';
 import { releaseWorkspaceSingleCommit } from './single-commit-release';
@@ -80,6 +86,14 @@ export interface ReleaseWorkspaceOptions {
    * Off unless named, because a workspace `devDependencies` entry is not bundled in general: a public package's test helper or lint config is a workspace devDependency whose changes never reach its consumers. A name that is not a package in the workspace, or is a private package, is rejected. Applies under every `commitStrategy` and to `gatePublish`. See `resolveBundledDependencies`.
    */
   readonly bundlingPackages?: readonly string[];
+  /**
+   * Where each publishing package's released versions are looked up before the run releases anything new, to find a release whose tag exists but whose version never reached the registry (see `recoverUnpublishedReleases`). Defaults to the npm CLI (`createNpmRegistryClient`). Not consulted under `gatePublish`, where a tag without a published version is the expected state until `resume` runs.
+   */
+  readonly registry?: RegistryClient;
+  /** Publishes such a release from its tagged commit. Defaults to `createTaggedCommitPublisher`, which runs the package's own publish plugins in a checkout of that commit. */
+  readonly recoveryPublisher?: RecoveryPublisher;
+  /** Called each time the run publishes a release (its publish plugins ran for it), a recovered one or a new one, as it happens, so a caller can record what was published even when a later release fails. Never called in a dry run, or for a release `gatePublish` defers. */
+  readonly onPublished?: (release: TaggedRelease) => void;
 }
 
 /** See `ReleaseWorkspaceOptions.pushAttempts` for how this number is derived. */
@@ -111,6 +125,8 @@ export interface WorkspaceReleaseOutcome {
   readonly packages: readonly PackageReleaseOutcome[];
   /** Present only when `gatePublish: true`: one entry per package in `order`, carrying the `@exadev/release-gate` state `resumeWorkspaceRelease` needs to finish publishing it later, or `null` for a package that had nothing to release. */
   readonly detached?: readonly DetachedPackageRelease[];
+  /** Present on every run that checks the registry (every run without `gatePublish`): the releases whose tag existed but whose version was missing from the registry, republished before anything new was released, in the order they were published. In a dry run, the releases that would be. */
+  readonly recovered?: readonly TaggedRelease[];
 }
 
 /**
@@ -128,10 +144,67 @@ export async function releaseWorkspace(options: ReleaseWorkspaceOptions = {}): P
     return detachWorkspaceRelease(options);
   }
 
-  if ((options.commitStrategy ?? 'per-package') === 'single') {
-    return releaseWorkspaceSingleCommit(options);
+  const commitStrategy = options.commitStrategy ?? 'per-package';
+  const recovered = await recoverUnpublishedWorkspaceReleases(options, commitStrategy);
+  const outcome = commitStrategy === 'single' ? await releaseWorkspaceSingleCommit(options) : await releaseWorkspacePerPackage(options);
+  return { ...outcome, recovered };
+}
+
+/**
+ * Publishes every release whose tag exists but whose version its registry does not hold, before the run releases anything new: see `recoverUnpublishedReleases`. Each package's publishing intent and publish plugins are the ones `commitStrategy` gives it for a new release, and a recovered release is reported through `onPublished` like a new one. A failure stops the run here, so nothing new is released on top of a release that is still missing.
+ */
+async function recoverUnpublishedWorkspaceReleases(options: ReleaseWorkspaceOptions, commitStrategy: CommitStrategy): Promise<readonly TaggedRelease[]> {
+  const root = resolve(options.root ?? process.cwd());
+  const log = options.log ?? console.log;
+  const env = sanitizeGitEnv(options.env ?? process.env);
+  const workspace = await discoverWorkspace(root);
+  const graph = buildDependencyGraph(workspace.packages);
+  const order = topologicalOrder(graph);
+  const plugins = resolveWorkspacePublishPlugins(
+    orderedPackages(graph, order),
+    { plugins: options.plugins ?? (commitStrategy === 'single' ? SINGLE_COMMIT_DEFAULT_PUBLISH_PLUGINS : DEFAULT_PUBLISH_PLUGINS), packagePlugins: options.packagePlugins },
+    workspace.root,
+    // Each strategy validates its own plugin list before it releases anything; republishing needs no commit of its own either way.
+    { requireGitPlugin: false },
+  );
+  const registrySteps = new Map(order.map((name) => [name, registryPublishStep(mustGet(graph.packages, name, 'package'), mustGet(plugins, name, 'publish plugins'), workspace.root)]));
+  const tagFormat = validateTagFormat(options.tagFormat ?? DEFAULT_TAG_FORMAT);
+  const repoRoot = (await git(['rev-parse', '--show-toplevel'], { cwd: workspace.root })).trim();
+
+  const recover = async (publisher: Readonly<RecoveryPublisher>): Promise<readonly TaggedRelease[]> =>
+    recoverUnpublishedReleases(
+      { graph, order, publishes: (pkg) => registrySteps.get(pkg.name) !== undefined, dryRun: options.dryRun === true, log, onRecovered: options.onPublished },
+      { tags: createGitReleasedTagSource(tagFormat, { cwd: workspace.root }), registry: options.registry ?? createNpmRegistryClient({ env }), publisher },
+    );
+  if (options.recoveryPublisher !== undefined) {
+    return recover(options.recoveryPublisher);
   }
 
+  const publisher = createTaggedCommitPublisher({
+    repoRoot,
+    env,
+    log,
+    tagFormat,
+    branches: options.branches,
+    plugins,
+    registryStep: (pkg) => {
+      const step = registrySteps.get(pkg.name);
+      if (step === undefined) {
+        throw new ReleaseConfigurationError(`Internal error: ${pkg.name} does not publish to a registry, so it has no release to republish.`);
+      }
+      return step;
+    },
+    generateNotesConfig: options.generateNotes ?? {},
+  });
+  try {
+    return await recover(publisher);
+  } finally {
+    await publisher.close();
+  }
+}
+
+/** `commitStrategy: 'per-package'`: see `releaseWorkspace`. */
+async function releaseWorkspacePerPackage(options: ReleaseWorkspaceOptions): Promise<WorkspaceReleaseOutcome> {
   const root = resolve(options.root ?? process.cwd());
   const log = options.log ?? console.log;
   const dryRun = options.dryRun === true;
@@ -167,6 +240,9 @@ export async function releaseWorkspace(options: ReleaseWorkspaceOptions = {}): P
       branches: options.branches,
     });
     const nextRelease = result === false ? undefined : result.nextRelease;
+    if (nextRelease !== undefined && !dryRun) {
+      options.onPublished?.({ name: pkg.name, version: nextRelease.version, gitTag: nextRelease.gitTag });
+    }
     return { released: nextRelease !== undefined, version: nextRelease?.version, releaseType, result };
   });
 

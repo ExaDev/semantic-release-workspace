@@ -36,6 +36,17 @@ export {
   type AppliedDependencyBump,
 } from './release';
 export { resumeWorkspaceRelease, type DetachedPackageRelease, type ResumeWorkspaceReleaseOptions } from './gate-publish';
+export {
+  recoverUnpublishedReleases,
+  type RecoveryCandidate,
+  type RecoveryPublisher,
+  type RegistryClient,
+  type ReleasedTagSource,
+  type TaggedRelease,
+} from './registry-recovery';
+export { createNpmRegistryClient } from './npm-registry';
+export { createTaggedCommitPublisher, type TaggedCommitPublisher } from './recovery-publisher';
+export { createGitReleasedTagSource, releasedTags, type ReleasedTag } from './released-tags';
 
 export {
   WorkspaceReleaseError,
@@ -45,4 +56,8 @@ export {
   ReleaseConfigurationError,
   GitCommandError,
   WorkspaceStateError,
+  PnpmCommandError,
+  RegistryQueryError,
+  UnpublishedReleaseRecoveryError,
+  type UnrecoveredRelease,
 } from './errors';
