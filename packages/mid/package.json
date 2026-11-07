@@ -1,0 +1,9 @@
+{
+  "name": "@fixture/mid",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@fixture/deep": "workspace:*"
+  }
+}
