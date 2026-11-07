@@ -60,10 +60,10 @@ describe('createNpmRegistryClient', () => {
     await expect(createNpmRegistryClient({ env: {}, run: npm.run }).hasVersion(pkg, '5.8.4')).resolves.toBe(false);
   });
 
-  it('treats an empty answer as absent, which is how npm view reports a missing version of a package that exists on npm releases before 11', async () => {
+  it('fails on an answer that is neither the version nor an E404, rather than reading it as absent', async () => {
     const pkg = await packageOnDisk({ name: 'pdf-codec', version: '5.8.4' });
 
-    await expect(createNpmRegistryClient({ env: {}, run: npmAnswering({ exitCode: 0, stdout: '', stderr: '' }).run }).hasVersion(pkg, '5.8.4')).resolves.toBe(false);
+    await expect(createNpmRegistryClient({ env: {}, run: npmAnswering({ exitCode: 0, stdout: '', stderr: '' }).run }).hasVersion(pkg, '5.8.4')).rejects.toBeInstanceOf(RegistryQueryError);
   });
 
   it('asks the registry the manifest publishes to', async () => {

@@ -20,27 +20,25 @@ export function createNpmRegistryClient(options: { readonly env: NodeJS.ProcessE
       const args = ['view', `${pkg.name}@${version}`, 'version', '--json', ...(publishRegistry === undefined ? [] : ['--registry', publishRegistry])];
       const result = await run('npm', args, { cwd: pkg.directory, env: options.env });
       const answer = parseAnswer(result.stdout);
-      if (result.exitCode === 0) {
-        // npm releases before 11 print nothing, and exit 0, for a version a published package does not have.
-        return answer === undefined ? false : answer === version;
+      if (result.exitCode === 0 && answer === version) {
+        return true;
       }
-      if (isJsonObject(answer) && isJsonObject(answer.error) && answer.error.code === NOT_FOUND_CODE) {
+      if (result.exitCode !== 0 && isJsonObject(answer) && isJsonObject(answer.error) && answer.error.code === NOT_FOUND_CODE) {
         return false;
       }
-      throw new RegistryQueryError(`npm ${args.join(' ')} failed in ${pkg.directory} (exit ${String(result.exitCode)}), so whether ${pkg.name}@${version} is published is unknown: ${result.stderr.trim()}`);
+      throw new RegistryQueryError(
+        `npm ${args.join(' ')} in ${pkg.directory} exited ${String(result.exitCode)} without saying whether ${pkg.name}@${version} is published: ${result.stdout.trim()} ${result.stderr.trim()}`,
+      );
     },
   };
 }
 
+/** npm view's `--json` answer: the version string when it exists, an `{ error: { code } }` object when it does not or the lookup failed. Anything else is left for the caller to reject as unrecognised. */
 function parseAnswer(stdout: string): unknown {
-  const trimmed = stdout.trim();
-  if (trimmed === '') {
-    return undefined;
-  }
   try {
-    const parsed: unknown = JSON.parse(trimmed);
+    const parsed: unknown = JSON.parse(stdout);
     return parsed;
   } catch {
-    throw new RegistryQueryError(`npm view printed something other than JSON: ${trimmed}`);
+    return stdout;
   }
 }
