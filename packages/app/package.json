@@ -1,0 +1,10 @@
+{
+  "name": "@fixture/app",
+  "version": "1.0.0",
+  "private": false,
+  "type": "module",
+  "devDependencies": {
+    "@fixture/core": "1.0.0",
+    "@fixture/util": "1.0.0"
+  }
+}
