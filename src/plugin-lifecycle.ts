@@ -6,7 +6,7 @@ import { ReleaseConfigurationError } from './errors';
  * Calling publish plugins' lifecycle steps directly, outside semantic-release's own `run()`, for the two places that publish an already-tagged release: `commitStrategy: 'single'`'s publish phase (`single-commit-release.ts`), and republishing a tagged release missing from its registry (`recovery-publisher.ts`). semantic-release's `run()` derives the last release from the newest matching tag, so it reads either release as already published.
  */
 
-/** The subset of a semantic-release plugin context the hand-built calls actually construct and pass, covering exactly the fields the `verifyConditions`/`prepare`/`publish`/`success` steps of `@semantic-release/changelog`, `@semantic-release/npm`, and `@semantic-release/github` read (confirmed by reading each plugin's own source) -- not the full upstream `VerifyReleaseContext` shape, most of which (`envCi`, `branches` plural, `lastRelease`) none of those steps consult. */
+/** The subset of a semantic-release plugin context the hand-built calls actually construct and pass, covering exactly the fields the `verifyConditions`/`prepare`/`publish`/`success` steps of `@semantic-release/changelog`, `@semantic-release/npm`, and `@semantic-release/github` read (confirmed by reading each plugin's own source), not the full upstream `VerifyReleaseContext` shape, most of which (`envCi`, `branches` plural, `lastRelease`) none of those steps consult. */
 export interface PluginCallContext {
   readonly cwd: string;
   readonly env: NodeJS.ProcessEnv;
@@ -41,7 +41,7 @@ export function channelOrNull(channel: string | false | undefined): string | nul
 
 export type ReleaseLifecycleFn = (pluginConfig: Record<string, unknown>, context: PluginCallContext) => Promise<unknown>;
 
-/** The shape of a dynamically-imported publish-plugin module, as far as the callers here call it directly: whichever of these four named exports it happens to define (the same generic, plugin-agnostic dispatch semantic-release's own core uses -- it does not hardcode which named plugin defines which step either). */
+/** The shape of a dynamically-imported publish-plugin module, as far as the callers here call it directly: whichever of these four named exports it happens to define (the same generic, plugin-agnostic dispatch semantic-release's own core uses, which does not hardcode which named plugin defines which step either). */
 export interface LoadedReleasePlugin {
   readonly verifyConditions?: ReleaseLifecycleFn;
   readonly prepare?: ReleaseLifecycleFn;
@@ -72,7 +72,7 @@ function isReleasePluginModule(value: unknown): value is LoadedReleasePlugin {
   return true;
 }
 
-/** Loads a publish plugin module directly (bypassing semantic-release's own step-pipeline machinery, which the callers cannot go through -- see this file's own top-of-file note), caching by resolved path so a plugin shared by several packages is imported once per run rather than once per package per phase. */
+/** Loads a publish plugin module directly (bypassing semantic-release's own step-pipeline machinery, which the callers cannot go through: see this file's own top-of-file note), caching by resolved path so a plugin shared by several packages is imported once per run rather than once per package per phase. */
 export async function loadReleasePlugin(absolutePath: string, cache: Map<string, LoadedReleasePlugin>): Promise<LoadedReleasePlugin> {
   const cached = cache.get(absolutePath);
   if (cached !== undefined) {
