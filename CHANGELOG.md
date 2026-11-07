@@ -1,3 +1,9 @@
+## [3.3.1](https://github.com/ExaDev/semantic-release-workspace/compare/v3.3.0...v3.3.1) (2026-11-07)
+
+### Bug Fixes
+
+* **recovery:** read npm 12's list answer to npm view as published ([b2b2e03](https://github.com/ExaDev/semantic-release-workspace/commit/b2b2e034b195d4f863363cf35fb7f3fa9f7d5733))
+
 ## [3.3.0](https://github.com/ExaDev/semantic-release-workspace/compare/v3.2.22...v3.3.0) (2026-11-07)
 
 ### Features
