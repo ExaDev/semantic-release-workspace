@@ -20,6 +20,8 @@ One orchestrator run, five stages:
 4. **Cross-package manifest bumping** — the heart of the design, covered in its own section below.
 5. **Standard plugins do the publishing.** @semantic-release/npm, @semantic-release/github, @semantic-release/changelog, and @semantic-release/git run per package exactly as in a single-package repository, scoped by `cwd`. The orchestrator coordinates and sequences them; it does not reimplement npm publishing, GitHub release creation, or changelog file writing.
 
+Before stage 3 releases anything, every run also republishes any release whose tag exists but whose version never reached its registry; see [Releases whose publish failed after tagging](#releases-whose-publish-failed-after-tagging).
+
 ## The manifest-bump timing decision
 
 When a package releases version `V`, every *not-yet-released-this-run* workspace package that depends on it gets its dependency range updated — and the timing of that update is the least obvious part of the whole design, because getting it wrong is exactly the bug class the documents.js ecosystem's old cross-repo automation hit (the `sibling-dependency-update` heal-job downgrade race: repository state and published manifests disagreeing, then automation "healing" in the wrong direction; see [documents.js#664](https://github.com/ExaDev/documents.js/issues/664)).
@@ -68,7 +70,8 @@ Everything above describes `commitStrategy: 'per-package'`, the default: unchang
 | Tags                 | Created and pushed as each package's own semantic-release run reaches its `prepare`/tag step | Created once analysis finishes for every released package, all pointing at the same combined commit, pushed together with it |
 | `@semantic-release/git` | Required in the publish plugin list for a real run (it makes the per-package commit) | Rejected outright if listed — its own `prepare` step would create exactly the per-package commit this mode exists to avoid; the combined commit is made by the orchestrator itself |
 | Default publish plugins | `DEFAULT_PUBLISH_PLUGINS` (changelog, npm, github, git) | `SINGLE_COMMIT_DEFAULT_PUBLISH_PLUGINS` — the same list minus git |
-| Crash recovery        | A bump commit already sitting in git history (from this run or an earlier one) is recognised via a machine-parseable trailer, so a run that resumes after a partial push still forces the right dependent releases | Not needed: either the whole combined commit lands and pushes, or the run fails before touching git at all, so there is never a partial push to recover from |
+| Crash recovery        | A bump commit already sitting in git history (from this run or an earlier one) is recognised via a machine-parseable trailer, so a run that resumes after a partial push still forces the right dependent releases | Not needed for git: either the whole combined commit lands and pushes, or the run fails before touching git at all, so there is never a partial push to recover from |
+| A publish failing after its tag was pushed | Republished from its tag by the next run (see [Releases whose publish failed after tagging](#releases-whose-publish-failed-after-tagging)) | The same |
 
 Everything about *what* releases (topological order, forced-patch dependents, dependency-range classification, path-scoped commit analysis, unsupported-range rejection) is identical between the two modes — `commitStrategy` only changes how the result is committed, tagged, and pushed.
 
@@ -80,9 +83,25 @@ Set it via the `--commit-strategy <mode>` CLI flag, the `commitStrategy` field i
 
 Under `commitStrategy: 'per-package'` a release is a sequence of independent pushes, so a commit landing on the release branch mid-run can interrupt it between packages. The orchestrator integrates the new tip and carries on with the packages that have not released yet, and packages already published are never republished, since their tags record them. Where semantic-release declines to release a package while the branch is moving underneath it, which is indistinguishable from that package genuinely having nothing to release, the package is released again against the integrated tip rather than assumed finished; a run that can never establish the answer fails rather than finishing as though the package had nothing, which would leave it and every package after it silently unreleased.
 
-One window is outside this tool's control: semantic-release pushes a package's tag before running its publish plugins, and that push is not atomic, so a rejection there can leave a tag on the remote for a version that never reached npm. Nothing is corrupted and no later release is blocked, but that version number is skipped. If it happens, find the tag with no matching published version (`npm view <name> versions`) and either publish from it by hand or delete the tag locally and on the remote and let the next run recompute it.
+semantic-release pushes a package's tag before running its publish plugins, so a run that stops between the two leaves a tag on the remote for a version that never reached the registry. The next run republishes it from that tag before releasing anything new (see [Releases whose publish failed after tagging](#releases-whose-publish-failed-after-tagging)).
 
-If you need a run to be strictly all-or-nothing, use `commitStrategy: 'single'`, which makes one commit and one atomic push before anything publishes, and which retries the whole attempt against the new tip when that push loses a race.
+If you need a run's git changes to be all-or-nothing, use `commitStrategy: 'single'`, which makes one commit and one atomic push before anything publishes, and which retries the whole attempt against the new tip when that push loses a race.
+
+## Releases whose publish failed after tagging
+
+Under both commit strategies a release is tagged and pushed before its publish plugins run, and every run reads a package's last release from its tags. A publish that fails after tagging (a registry or signing service outage, a cancelled job) therefore leaves a tag that every later run treats as released, and without recovery that version would never be published.
+
+So every run, before it releases anything new, compares each publishing package's highest release tag on the branch with its registry, and republishes any version the registry does not hold:
+
+- **Which packages.** A package publishes when it is not `private` and its publish plugin list (the workspace-wide list, the private-package variant, or its `packagePlugins` entry, as for a new release) includes `@semantic-release/npm` without `npmPublish: false`, the same rule `@semantic-release/npm` applies itself. Only those are looked up. The lookup is `npm view <name>@<version> version`, run in the package's directory with the release environment, against `publishConfig.registry` when the manifest names one.
+- **From the tagged commit.** The tagged commit is checked out into a separate linked worktree and installed with `pnpm install --frozen-lockfile`, as the release job that tagged it was, so the build `npm publish` runs sees exactly the tagged sources. Releases tagged on the same commit share one checkout. The release checkout itself is never touched.
+- **Through the package's own plugins.** The context comes from a dry semantic-release run in the package's directory (so a release is only republished from a branch semantic-release would release from), and the notes are regenerated by the same path-scoped generator over the commits between the previous release tag and the release commit. Then every plugin's `verifyConditions` runs, the `publish` step of `@semantic-release/npm` and of every plugin after it in the list, and every plugin's `success`: publish plugins run in order and stop at the first failure, so when the registry lacks the version, nothing from the npm plugin on published it. Provenance, OIDC trusted publishing and the GitHub Release work exactly as they do for a new release.
+- **In dependency order, and loudly.** Releases are republished in the run's topological order. A publish the registry refuses because it already holds the version (`E403`, "cannot publish over the previously published versions") counts as done. Any other failure is reported per release: every release that depends on the failed one through workspace dependencies is left unpublished, independent ones still publish, and the run then fails before releasing anything new, so the next run retries the same recovery first.
+- **Not under `gatePublish`**, where a tag without a published version is the expected state until `resume` runs.
+
+A dry run looks the versions up and reports what it would republish. Each republished release is printed as `<name>: <tag> (republished: ...)`, returned in `WorkspaceReleaseOutcome.recovered`, and reported through `onPublished` and `--published-tags-file` like a new release.
+
+A CI workflow that works out what a run released by diffing the repository's tags before and after it will not see a republished release, since its tag already existed. Pass `--published-tags-file <path>` and read that file instead: it lists the tag of every release the run published, new or republished, one per line, appended as each is published, so it is complete up to the point a failing run stopped.
 
 ## Tag format
 
@@ -235,6 +254,7 @@ Run it from the workspace root (or pass `--root <directory>`). A dry run analyse
 | `--gate-publish` | Tag and push each due package, but defer publishing — see [Gating publish](#gating-publish). Requires `--gate-state-file`; rejected with `--commit-strategy single` |
 | `--gate-state-file <path>` | With `--gate-publish`: where to write the state a later `resume` run needs |
 | `--bundling-package <name>` | A public package whose build bundles its workspace `devDependencies`, repeatable; see [Packages that bundle their siblings](#packages-that-bundle-their-siblings) |
+| `--published-tags-file <path>` | Write the tag of every release the run publishes, new or republished, to this file, one per line, as each is published; see [Releases whose publish failed after tagging](#releases-whose-publish-failed-after-tagging) |
 | `--config <file>` | A config file (`.json`, `.yaml`, `.yml`, `.js`, `.cjs`, `.mjs`, `.ts`, `.cts`, or `.mts`, loaded via [cosmiconfig](https://github.com/cosmiconfig/cosmiconfig)) providing any of the above, plus `packagePlugins` (see [Per-package publish plugins](#per-package-publish-plugins)), through its default export; explicit flags win. TypeScript files are run by Node's own type stripping, so they may use only erasable type syntax (annotations and `import type`, not `enum` or `namespace`) |
 
 `resume` (a separate subcommand, not a `release` flag) finishes publishing what a `--gate-publish` run tagged and pushed:
@@ -243,6 +263,7 @@ Run it from the workspace root (or pass `--root <directory>`). A dry run analyse
 | --- | --- |
 | `--root <directory>` | Workspace root holding `pnpm-workspace.yaml` in *this* checkout — may differ from the one that ran `release --gate-publish` (default: the process working directory) |
 | `--gate-state-file <path>` | Required — the state file a `release --gate-publish` run wrote |
+| `--published-tags-file <path>` | Write the tag of every release this resume publishes to this file, one per line, as each is published |
 
 Listing `@semantic-release/commit-analyzer` or `@semantic-release/release-notes-generator` as a `--plugin` is rejected: the orchestrator always provides those two steps itself (wrapped), so configuring them there would be a silent no-op — pass their options via `--analyze-commits`/`--generate-notes` instead. A real (non-dry) run under `commitStrategy: 'per-package'` (the default) must include `@semantic-release/git` in the pipeline, because without it nothing commits released manifests and changelogs back to the branch; `commitStrategy: 'single'` is the opposite — it rejects `@semantic-release/git` outright, since it does that committing itself (see [Commit strategies](#commit-strategies)).
 
@@ -333,7 +354,9 @@ const outcome = await releaseWorkspace({
 });
 ```
 
-Every stage is also exported individually — `discoverWorkspace`, `buildDependencyGraph`, `topologicalOrder`, `updateDependencyRange`, `resolveBundledDependencies`, `createScopedPlugins`, `filterCommitsToDirectory`, `resumeWorkspaceRelease` — along with the error hierarchy (`WorkspaceReleaseError` and friends) so embedders can distinguish orchestration failures from unexpected crashes.
+Every stage is also exported individually (`discoverWorkspace`, `buildDependencyGraph`, `topologicalOrder`, `updateDependencyRange`, `resolveBundledDependencies`, `createScopedPlugins`, `filterCommitsToDirectory`, `resumeWorkspaceRelease`, `recoverUnpublishedReleases`), along with the error hierarchy (`WorkspaceReleaseError` and friends) so embedders can distinguish orchestration failures from unexpected crashes.
+
+Recovering releases missing from the registry takes its dependencies as options, each defaulting to the real implementation: `registry` (a `RegistryClient`, default `createNpmRegistryClient`) answers whether a version is published, and `recoveryPublisher` (a `RecoveryPublisher`, default `createTaggedCommitPublisher`) publishes a tagged release. `onPublished` is called with `{ name, version, gitTag }` as each release, new or republished, is published.
 
 ### Repository requirements
 
