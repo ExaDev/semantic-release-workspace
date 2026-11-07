@@ -1,0 +1,9 @@
+{
+  "name": "@fixture/b",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@fixture/a": "^1.0.0"
+  }
+}
