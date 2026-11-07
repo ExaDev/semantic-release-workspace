@@ -1,3 +1,27 @@
+## [3.3.0](https://github.com/ExaDev/semantic-release-workspace/compare/v3.2.22...v3.3.0) (2026-11-07)
+
+### Features
+
+* **cli:** record every published tag with --published-tags-file ([4398844](https://github.com/ExaDev/semantic-release-workspace/commit/43988447c7ffc90a648b79045a1b117e6c5b51d3))
+* **recovery:** look up published versions with the npm CLI ([3ea1807](https://github.com/ExaDev/semantic-release-workspace/commit/3ea18072553a7f569fadd9bb47d617ee011acd93))
+* **recovery:** publish a tagged release from a checkout of its commit ([8f82158](https://github.com/ExaDev/semantic-release-workspace/commit/8f821584e61b43c3815fdf0eb4d1951d57a19c56))
+* **recovery:** read a package's released versions from its tags ([03b6936](https://github.com/ExaDev/semantic-release-workspace/commit/03b69362cef331ac7cb1af648d00db448cbbbc34))
+* **recovery:** republish tagged versions missing from their registry ([9a2a45f](https://github.com/ExaDev/semantic-release-workspace/commit/9a2a45f4bd820373fa977c266487d65ea7d6d94a))
+
+### Bug Fixes
+
+* republish tagged releases missing from the registry before releasing anything new ([2bf150e](https://github.com/ExaDev/semantic-release-workspace/commit/2bf150e7c5d70f7bfe6343ef2907c764e0184ee5))
+
+### Code Refactoring
+
+* **recovery:** reject an npm view answer that is neither the version nor an E404 ([9efc11a](https://github.com/ExaDev/semantic-release-workspace/commit/9efc11a99ad4f0db592d861c04e2344a798acdc7))
+* share the direct plugin lifecycle calls outside single mode ([f5d95a3](https://github.com/ExaDev/semantic-release-workspace/commit/f5d95a36fb525d1581e8341c2aca45c640ffcfc7))
+
+### Documentation
+
+* describe how a release whose publish failed after tagging is recovered ([e218d29](https://github.com/ExaDev/semantic-release-workspace/commit/e218d29b24f6867c59c7cbce619c43adfbeb34b5))
+* punctuate the plugin lifecycle comments without spaced hyphens ([a918379](https://github.com/ExaDev/semantic-release-workspace/commit/a918379765f3c3d2fbc32481f92d82c710f5fbb1))
+
 ## [3.2.22](https://github.com/ExaDev/semantic-release-workspace/compare/v3.2.21...v3.2.22) (2026-11-06)
 
 ### Build System
