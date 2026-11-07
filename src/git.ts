@@ -1,3 +1,4 @@
+import type { Commit } from 'semantic-release';
 import { GitCommandError, WorkspaceStateError } from './errors';
 import { execFile } from './exec-file';
 
@@ -230,6 +231,60 @@ export async function deleteLocalTags(tagNames: readonly string[], options: GitC
     return;
   }
   await git(['tag', '-d', ...tagNames], options);
+}
+
+/** The commit a ref (a tag, a branch, `HEAD`) points at, peeling an annotated tag to the commit it names. */
+export async function commitOf(ref: string, options: GitCommandOptions): Promise<string> {
+  return (await git(['rev-parse', '--verify', `${ref}^{commit}`], options)).trim();
+}
+
+/** Checks `commit` out, detached, into a new linked worktree at `directory` (absent, or an empty directory), leaving the checkout at `options.cwd` untouched. */
+export async function addDetachedWorktree(directory: string, commit: string, options: GitCommandOptions): Promise<void> {
+  await git(['worktree', 'add', '--detach', directory, commit], options);
+}
+
+/** Drops the registration of every linked worktree whose directory no longer exists from the repository at `options.cwd`. */
+export async function pruneWorktrees(options: GitCommandOptions): Promise<void> {
+  await git(['worktree', 'prune'], options);
+}
+
+/** Separates the fields of one commit's record in `readCommits`. Chosen from the C0 control range, like `COMMIT_RECORD_SEPARATOR`, so it can never appear in a hash, a name or a commit message. */
+const COMMIT_FIELD_SEPARATOR = '\x1f';
+
+/** The `git log --format` placeholders `readCommits` reads, in record order. */
+const COMMIT_FIELDS = ['%H', '%h', '%T', '%t', '%an', '%ae', '%aI', '%cn', '%ce', '%cI', '%s', '%b', '%B'] as const;
+
+/**
+ * The commits in `range` (any `git log` revision range), newest first, in the shape semantic-release hands its plugins, for building a plugin context outside semantic-release's own `run()`. `message` is trimmed as semantic-release trims it.
+ */
+export async function readCommits(range: string, options: GitCommandOptions): Promise<Commit[]> {
+  const output = await git(['log', `--format=${COMMIT_RECORD_SEPARATOR}${COMMIT_FIELDS.join(COMMIT_FIELD_SEPARATOR)}`, range], options);
+  const commits: Commit[] = [];
+  for (const record of output.split(COMMIT_RECORD_SEPARATOR)) {
+    if (record.trim() === '') {
+      continue;
+    }
+    const fields = record.split(COMMIT_FIELD_SEPARATOR);
+    const read = (placeholder: (typeof COMMIT_FIELDS)[number]): string => {
+      const value = fields[COMMIT_FIELDS.indexOf(placeholder)];
+      if (value === undefined || fields.length !== COMMIT_FIELDS.length) {
+        throw new GitCommandError(['log', range], options.cwd, undefined, `a commit record did not carry exactly the ${String(COMMIT_FIELDS.length)} requested fields: ${record}`);
+      }
+      return value;
+    };
+    commits.push({
+      commit: { long: read('%H'), short: read('%h') },
+      tree: { long: read('%T'), short: read('%t') },
+      author: { name: read('%an'), email: read('%ae'), short: read('%aI') },
+      committer: { name: read('%cn'), email: read('%ce'), short: read('%cI') },
+      subject: read('%s'),
+      body: read('%b').trim(),
+      message: read('%B').trim(),
+      hash: read('%H'),
+      committerDate: read('%cI'),
+    });
+  }
+  return commits;
 }
 
 function toGitCommandError(args: readonly string[], cwd: string, cause: unknown): GitCommandError {
