@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { InvalidArgumentError } from 'commander';
@@ -339,6 +339,27 @@ describe('release command tag format', () => {
       const printed = await runReleaseCommand(['--root', fixture.root, '--dry-run', '--config', config, '--tag-format', '${name}-v${version}']);
 
       expect(printed).toContain('@fixture/a: @fixture/a-v1.1.0 (minor)');
+    } finally {
+      await fixture.remove();
+    }
+  }, TestTimeoutMs.Long);
+});
+
+describe('release command published tags file', () => {
+  it('replaces the file with the tag of every release the run published', async () => {
+    const fixture = await createWorkspaceFixture(
+      [
+        { name: '@fixture/a', version: '1.0.0' },
+        { name: '@fixture/b', version: '1.0.0', dependencies: { '@fixture/a': '^1.0.0' } },
+      ],
+      [{ message: 'feat(a): feature', files: { 'packages/a/src/index.js': 'export const a = 2;\n' } }],
+      { pnpmLockfile: true },
+    );
+    try {
+      const tagsFile = await temporaryConfigFile('published-tags.txt', 'left over from an earlier run\n');
+      await runReleaseCommand(['--root', fixture.root, '--published-tags-file', tagsFile, ...FIXTURE_PLUGIN_FLAGS]);
+
+      expect(await readFile(tagsFile, 'utf8')).toBe('@fixture/a@1.1.0\n@fixture/b@1.0.1\n');
     } finally {
       await fixture.remove();
     }

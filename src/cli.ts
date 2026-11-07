@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { appendFileSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
 import { cosmiconfig } from 'cosmiconfig';
 import { Command, InvalidArgumentError } from 'commander';
@@ -28,6 +29,22 @@ const COMMIT_STRATEGIES: ReadonlySet<string> = new Set<CommitStrategy>(['per-pac
 
 function isCommitStrategy(value: string): value is CommitStrategy {
   return COMMIT_STRATEGIES.has(value);
+}
+
+const PUBLISHED_TAGS_FILE_HELP =
+  'write the tag of every release this run publishes to this file, one per line, as each is published: new releases and releases republished because their tag existed but their version was missing from the registry';
+
+/**
+ * The `onPublished` sink behind `--published-tags-file`: empties the file once, then appends each published release's tag as it happens. Appending as each release publishes, rather than writing once at the end, keeps every publish on record when a later one fails the run, since a later run will not publish those again.
+ */
+async function publishedTagsRecorder(path: string | undefined): Promise<((release: { readonly gitTag: string }) => void) | undefined> {
+  if (path === undefined) {
+    return undefined;
+  }
+  await writeFile(path, '');
+  return (release) => {
+    appendFileSync(path, `${release.gitTag}\n`);
+  };
 }
 
 /**
@@ -75,6 +92,7 @@ export function createProgram(): Command {
     collectRepeated,
     [],
   );
+  release.option('--published-tags-file <path>', PUBLISHED_TAGS_FILE_HELP);
   release.option(
     '--config <file>',
     'config file (.json, .yaml, .yml, .js, .cjs, or .ts) providing any of the release options (dryRun, branches, plugins, packagePlugins, analyzeCommits, generateNotes, commitStrategy, tagFormat, gatePublish, bundlingPackages); explicit flags win',
@@ -85,6 +103,7 @@ export function createProgram(): Command {
   resume.description('Finish publishing every package a --gate-publish release tagged and pushed but did not publish.');
   resume.option('--root <directory>', 'workspace root holding pnpm-workspace.yaml (this checkout, which may differ from the one that ran release --gate-publish)', process.cwd());
   resume.requiredOption('--gate-state-file <path>', 'the state file a "release --gate-publish" run wrote');
+  resume.option('--published-tags-file <path>', PUBLISHED_TAGS_FILE_HELP);
   resume.action(runResume);
 
   return program;
@@ -127,6 +146,7 @@ interface ReleaseFlags {
   readonly gatePublish: boolean | undefined;
   readonly gateStateFile: string | undefined;
   readonly bundlingPackage: string[];
+  readonly publishedTagsFile: string | undefined;
   readonly config: string | undefined;
 }
 
@@ -150,9 +170,10 @@ async function runRelease(flags: ReleaseFlags): Promise<void> {
     throw new InvalidArgumentError('--gate-publish requires --gate-state-file, since that is where the state a later "resume" run needs gets written');
   }
 
+  const dryRun = flags.dryRun ?? (file.dryRun === true ? true : undefined);
   const outcome = await releaseWorkspace({
     root: flags.root,
-    dryRun: flags.dryRun ?? (file.dryRun === true ? true : undefined),
+    dryRun,
     branches: flags.branches.length > 0 ? flags.branches : file.branches,
     // No `?? DEFAULT_PUBLISH_PLUGINS` fallback here: which default plugin list applies depends on commitStrategy (git is part of the default for "per-package", forbidden for "single"), so an unset `plugins` is passed straight through and `releaseWorkspace` picks the right default for whichever strategy is in effect.
     plugins: flags.plugin.length > 0 ? flags.plugin.map((spec) => parsePluginSpec(spec)) : file.plugins,
@@ -164,8 +185,12 @@ async function runRelease(flags: ReleaseFlags): Promise<void> {
     tagFormat: flags.tagFormat ?? file.tagFormat,
     gatePublish,
     bundlingPackages: flags.bundlingPackage.length > 0 ? flags.bundlingPackage : file.bundlingPackages,
+    onPublished: await publishedTagsRecorder(flags.publishedTagsFile),
   });
 
+  for (const release of outcome.recovered ?? []) {
+    console.log(`${release.name}: ${release.gitTag} (${dryRun === true ? 'would republish' : 'republished'}: its tag existed but its version was missing from the registry)`);
+  }
   for (const pkg of outcome.packages) {
     console.log(describeOutcome(pkg));
   }
@@ -183,6 +208,7 @@ async function runRelease(flags: ReleaseFlags): Promise<void> {
 interface ResumeFlags {
   readonly root: string;
   readonly gateStateFile: string;
+  readonly publishedTagsFile: string | undefined;
 }
 
 async function runResume(flags: ResumeFlags): Promise<void> {
@@ -192,7 +218,7 @@ async function runResume(flags: ResumeFlags): Promise<void> {
     throw new InvalidArgumentError(`--gate-state-file ${flags.gateStateFile} does not contain a valid gate state array`);
   }
 
-  const outcome = await resumeWorkspaceRelease({ root: flags.root, detached: parsed });
+  const outcome = await resumeWorkspaceRelease({ root: flags.root, detached: parsed, onPublished: await publishedTagsRecorder(flags.publishedTagsFile) });
   for (const pkg of outcome.packages) {
     console.log(describeOutcome(pkg));
   }
