@@ -1,3 +1,9 @@
+## [3.3.3](https://github.com/ExaDev/semantic-release-workspace/compare/v3.3.2...v3.3.3) (2026-11-09)
+
+### Build System
+
+* **deps-dev:** bump globals from 17.13.0 to 17.14.0 ([2e269dc](https://github.com/ExaDev/semantic-release-workspace/commit/2e269dc0a5b0a8c9ea2ea8d0b63c2f2abce71822))
+
 ## [3.3.2](https://github.com/ExaDev/semantic-release-workspace/compare/v3.3.1...v3.3.2) (2026-11-09)
 
 ### Build System
