@@ -1,4 +1,5 @@
 import { ReleaseConfigurationError } from './errors';
+import { type GitCommandOptions, pathspecsEverMatched } from './git';
 import { type DependencyGraph } from './graph';
 import { isJsonObject, isStringArray } from './json';
 
@@ -38,6 +39,25 @@ export function resolvePackageSources(graph: DependencyGraph, packageSources: Re
 
   if (problems.length > 0) {
     throw new ReleaseConfigurationError(`packageSources is invalid: ${problems.join('; ')}.`);
+  }
+  return resolved;
+}
+
+/**
+ * `resolvePackageSources`, then a check against the repository that every pattern has matched something: a tracked file now, or a commit that touched it earlier (so a path whose files were all deleted still counts). A pattern that matches nothing in the whole history is almost always a typo, and would otherwise leave the package silently unreleased by changes to the sources it meant, the failure `packageSources` exists to remove. `options.cwd` is any directory inside the repository.
+ */
+export async function loadPackageSources(graph: DependencyGraph, packageSources: Readonly<Record<string, readonly string[]>> | undefined, options: GitCommandOptions): Promise<PackageSourcePatterns> {
+  const resolved = resolvePackageSources(graph, packageSources);
+  const unmatched: string[] = [];
+  for (const [name, patterns] of resolved) {
+    for (const pattern of patterns) {
+      if (!(await pathspecsEverMatched(toPathspecs([pattern]), options))) {
+        unmatched.push(`${name}: ${JSON.stringify(pattern)} matches no file in this repository's history`);
+      }
+    }
+  }
+  if (unmatched.length > 0) {
+    throw new ReleaseConfigurationError(`packageSources is invalid: ${unmatched.join('; ')}. Check the spelling; a path is relative to the repository root.`);
   }
   return resolved;
 }

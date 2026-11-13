@@ -18,7 +18,7 @@ import {
   workingTreeChanges,
 } from './git';
 import { type BundledDependencies, resolveBundledDependencies } from './bundling';
-import { resolvePackageSources } from './package-sources';
+import { loadPackageSources } from './package-sources';
 import { buildDependencyGraph, mustGet, orderedPackages, topologicalOrder, validateDependencyRanges, type DependencyGraph } from './graph';
 import { writeDependencyRange } from './manifest';
 import { packageName } from './package-name';
@@ -111,7 +111,7 @@ async function attemptSingleCommitRelease(options: ReleaseWorkspaceOptions): Pro
     { requireGitPlugin: false, forbidGitPlugin: true },
   );
   const bundled = resolveBundledDependencies(graph, options.bundlingPackages);
-  const sources = resolvePackageSources(graph, options.packageSources);
+  const sources = await loadPackageSources(graph, options.packageSources, { cwd: workspace.root });
   const analyzeCommitsConfig = options.analyzeCommits ?? {};
   const generateNotesConfig = options.generateNotes ?? {};
   const tagFormat = validateTagFormat(options.tagFormat ?? DEFAULT_TAG_FORMAT);

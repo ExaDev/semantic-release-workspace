@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { GitCommandError, WorkspaceStateError } from './errors';
-import { changedPathsSince, createTag, currentBranch, git, pushHead, pushHeadAndTags, resolveCommitIdentity } from './git';
+import { changedPathsSince, commitsTouching, createTag, currentBranch, git, pushHead, pushHeadAndTags, resolveCommitIdentity } from './git';
 import { createWorkspaceFixture } from './git-workspace-fixture';
 import { TestTimeoutMs } from './test-timeouts';
 
@@ -118,4 +118,30 @@ describe('git', () => {
       await fixture.remove();
     }
   });
+});
+
+describe('commitsTouching', () => {
+  const commits = [{ message: 'fix: change a source', files: { '../rust/crates/a/src/lib.rs': 'x\n' } }];
+
+  it('matches a glob pathspec, and a deleted file, from the repository toplevel', async () => {
+    const fixture = await createWorkspaceFixture(onePackage, [...commits, { message: 'chore: remove a source', remove: ['../rust/crates/a/src/lib.rs'] }], { workspaceSubdirectory: 'mono' });
+    try {
+      const hashes = await commitsTouching(undefined, [':(top,glob)rust/crates/*/src', ':(top,glob)rust/crates/*/src/**'], { cwd: fixture.root });
+      expect(hashes.size).toBe(2);
+    } finally {
+      await fixture.remove();
+    }
+  }, TestTimeoutMs.Short);
+
+  it.each(['GIT_LITERAL_PATHSPECS', 'GIT_NOGLOB_PATHSPECS', 'GIT_ICASE_PATHSPECS'])('gives the same answer with %s set in the caller environment', async (variable) => {
+    const fixture = await createWorkspaceFixture(onePackage, commits, { workspaceSubdirectory: 'mono' });
+    try {
+      vi.stubEnv(variable, '1');
+      const hashes = await commitsTouching(undefined, [':(top,glob)rust/crates/*/src', ':(top,glob)rust/crates/*/src/**'], { cwd: fixture.root });
+      expect(hashes.size).toBe(1);
+    } finally {
+      vi.unstubAllEnvs();
+      await fixture.remove();
+    }
+  }, TestTimeoutMs.Short);
 });
