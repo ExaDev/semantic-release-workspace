@@ -47,9 +47,22 @@ describe('resolvePackageSources', () => {
     ['the repository root', '.', /names no path below the repository root/],
     ['an empty string', '', /names no path below the repository root/],
     ['a backslash path', 'rust\\crates', /contains a backslash/],
+    ['a lone wildcard', '*', /has no literal path segment/],
+    ['a lone double wildcard', '**', /has no literal path segment/],
+    ['a wildcard directory with a double wildcard', '*/**', /has no literal path segment/],
+    ['a double wildcard with a wildcard file', '**/*', /has no literal path segment/],
+    ['a single-character wildcard', '?/**', /has no literal path segment/],
   ])('rejects %s', (_label, pattern, message) => {
     expect(() => resolvePackageSources(graph, { a: [pattern] })).toThrow(ReleaseConfigurationError);
     expect(() => resolvePackageSources(graph, { a: [pattern] })).toThrow(message);
+  });
+
+  it('names the package and the pattern when it refuses a pattern with no literal segment', () => {
+    expect(() => resolvePackageSources(graph, { b: ['**/*'] })).toThrow(/b: "\*\*\/\*" has no literal path segment/);
+  });
+
+  it.each(['rust/**', 'rust/*/src', '**/src', '*.rs', 'rust/crates/*'])('accepts %s, which names a literal segment or part of one', (pattern) => {
+    expect(resolvePackageSources(graph, { a: [pattern] }).get('a')).toEqual([pattern]);
   });
 
   it('reports every offence at once', () => {
