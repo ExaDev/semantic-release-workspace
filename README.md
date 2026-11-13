@@ -16,7 +16,7 @@ One orchestrator run, five stages:
 
 1. **Workspace discovery.** Reads the `packages` globs from `pnpm-workspace.yaml` and every matched package's `package.json` (`dependencies`, `devDependencies`, `peerDependencies`, `optionalDependencies`), building the inter-package dependency graph keyed by package name. Packages must live in subdirectories (a package at the workspace root touches every commit and cannot be path-scoped) and names must be unique. This stage also resolves the workspace root's own path relative to the git repository's toplevel (`git rev-parse --show-prefix`), because `git log --name-only` always reports changed paths relative to that toplevel, not to `pnpm-workspace.yaml`'s own directory -- the two differ whenever the workspace is nested inside a larger repository, and every package's commit filtering is scoped against the repository-relative path, not the workspace-relative one, so nested workspaces are path-scoped correctly rather than silently matching nothing.
 2. **Topological release ordering.** Kahn's algorithm over the discovered graph, so a package only releases after every workspace sibling it depends on has already released in this run. Ties are broken alphabetically within each dependency layer, so the same workspace always produces the same order. A dependency cycle has no valid order at all — the run fails loudly, naming the loop (`x -> y -> x`), rather than picking one of the wrong answers and publishing a package whose sibling dependency points at a version that does not exist yet.
-3. **Per-package scoped release.** For each package in order, the orchestrator calls semantic-release's programmatic API (`require('semantic-release')`, not the CLI) with `cwd` set to the package's directory, `tagFormat` resolved from the `tagFormat` option (default `'${name}@${version}'`) so each package's tags stay distinct in the one shared tag namespace, and inline `analyzeCommits`/`generateNotes` plugins. Each wrapper runs one `git log --name-only --no-renames` pass over the same release range semantic-release already analysed (from the package's last matching tag to `HEAD`, or the whole history for a first release), maps every commit to the paths it changed, and filters the commit list down to commits touching the package's own directory **before delegating to the real @semantic-release/commit-analyzer and @semantic-release/release-notes-generator**. Conventional-commit parsing and changelog formatting stay entirely inside the standard plugins — the orchestrator only scopes what they see.
+3. **Per-package scoped release.** For each package in order, the orchestrator calls semantic-release's programmatic API (`require('semantic-release')`, not the CLI) with `cwd` set to the package's directory, `tagFormat` resolved from the `tagFormat` option (default `'${name}@${version}'`) so each package's tags stay distinct in the one shared tag namespace, and inline `analyzeCommits`/`generateNotes` plugins. Each wrapper runs one `git log --name-only --no-renames` pass over the same release range semantic-release already analysed (from the package's last matching tag to `HEAD`, or the whole history for a first release), maps every commit to the paths it changed, and filters the commit list down to commits touching the package's own directory (or a path listed for it in [`packageSources`](#packages-built-from-sources-outside-their-directory)) **before delegating to the real @semantic-release/commit-analyzer and @semantic-release/release-notes-generator**. Conventional-commit parsing and changelog formatting stay entirely inside the standard plugins — the orchestrator only scopes what they see.
 4. **Cross-package manifest bumping** — the heart of the design, covered in its own section below.
 5. **Standard plugins do the publishing.** @semantic-release/npm, @semantic-release/github, @semantic-release/changelog, and @semantic-release/git run per package exactly as in a single-package repository, scoped by `cwd`. The orchestrator coordinates and sequences them; it does not reimplement npm publishing, GitHub release creation, or changelog file writing.
 
@@ -321,6 +321,29 @@ A sibling bundled only indirectly counts too. When a bundled private package dep
 Nothing else changes. Private packages keep their own version bumps, the forced patch included, so their versions and tags are what they would be without the option, and they are still never published. The release type travels in the bump commit's trailer, so a run that resumes after a partial push reaches the same release type.
 
 The option is off unless set, because a workspace `devDependencies` entry is not bundled in general: a public package's test helpers or lint config are workspace `devDependencies` whose changes never reach its consumers, and those keep the forced patch. Name only packages whose every workspace `devDependencies` entry ships inside their build. A name that is not a package in the workspace, or names a private package, is rejected before anything releases. The option applies under both commit strategies and with `gatePublish`, and is set with `--bundling-package <name>` (repeatable), the `bundlingPackages` field in a `--config` file, or the `bundlingPackages` option to `releaseWorkspace()`.
+
+### Packages built from sources outside their directory
+
+A commit counts towards a package only when it changes a file under the package's directory, so a package whose published files are built from sources elsewhere in the repository, such as a WebAssembly build of a Rust crate under `rust/crates/<name>`, never releases when only those sources change. `packageSources` lists, per package name, the extra repository paths whose commits count towards that package as well:
+
+```ts
+// release-workspace.config.ts
+import type { ReleaseWorkspaceOptions } from '@exadev/semantic-release-workspace';
+
+const config: ReleaseWorkspaceOptions = {
+  packageSources: {
+    trilean: ['rust/crates/trilean', 'rust/bindings/trilean-wasm', 'conformance/trilean'],
+  },
+};
+
+export default config;
+```
+
+Each entry is a path or a glob relative to the git repository's toplevel, not to `pnpm-workspace.yaml`. A commit counts when it changed that path, a file beneath it or a file matching it, and `*` matches within one path segment where `**` crosses segments, so `rust/crates/*/src` covers every crate's sources. Matching is done by git, so a file a commit deleted still matches. A path may be listed for several packages, and a commit touching it releases each of them.
+
+The list only widens which commits count as a change to the package. Commit analysis, release notes, the notes of a recovered release and every commit strategy read the same widened list, and the orchestrator still writes its own commits (dependency bumps, changelogs and manifests) only inside the package's directory. Without the option every package is scoped to its own directory.
+
+An entry that is absolute, has a `..` segment, uses a backslash or names the repository root itself is rejected, as is a package name that is not in the workspace, before anything releases. The option is set with the `packageSources` field in a `--config` file or the `packageSources` option to `releaseWorkspace()`; the command line has no flag for it, because a mapping from package names has no natural shape as a repeatable flag.
 
 ### Programmatic API
 
