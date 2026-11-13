@@ -283,7 +283,7 @@ async function installHook(gitRoot: string, name: string, script: string): Promi
  *
  * This is what makes the rejection genuine rather than mocked: git runs this hook after the orchestrator has finished analysing, preparing, committing and tagging, and immediately before it negotiates refs with the remote, so the remote really has moved by the time our refs are offered and the remote itself really rejects them as non-fast-forward. semantic-release's own `verifyAuth` probe cannot trip it, because that probe passes `--no-verify` (see its `lib/git.js`), so every hook invocation counted here is a real orchestrator push.
  */
-async function installCompetingPusher(gitRoot: string, remoteUrl: string, counterFile: string, sabotagePushes: number): Promise<void> {
+async function installCompetingPusher(gitRoot: string, remoteUrl: string, counterFile: string, sabotagePushes: number, options: { readonly addsPackage?: boolean } = {}): Promise<void> {
   await installHook(
     gitRoot,
     'pre-push',
@@ -301,6 +301,9 @@ async function installCompetingPusher(gitRoot: string, remoteUrl: string, counte
       'git config user.email "competing@example.com"',
       'mkdir -p packages/a/src',
       'printf "export const competing = %s;\\n" "$COUNT" > "packages/a/src/competing-$COUNT.js"',
+      ...(options.addsPackage === true
+        ? ['mkdir -p packages/added', 'printf \'{"name":"@fixture/added","version":"1.0.0","private":true}\\n\' > packages/added/package.json', 'git add -- packages/added/package.json']
+        : []),
       'git add -- "packages/a/src/competing-$COUNT.js"',
       'git commit --quiet -m "feat(a): competing feature landed mid-run"',
       'git push --quiet origin HEAD:main',
@@ -352,6 +355,23 @@ describe('releaseWorkspace with commitStrategy "single" when the branch moves un
       const calls = await readRecordingPluginCalls(plugin);
       expect(calls.publish).toEqual([{ name: '@fixture/a@1.1.0', version: '1.1.0' }]);
       expect(await countPushes(counter)).toBe(2);
+    } finally {
+      await plugin.remove();
+      await fixture.remove();
+    }
+  }, TestTimeoutMs.Long);
+
+  it('retries against a tip that added a workspace package, whether or not packageSources is set', async () => {
+    const fixture = await createWorkspaceFixture(retryPackages, [{ message: 'fix(a): a patch worth releasing', files: { 'packages/a/src/index.js': 'export const a = 2;\n' } }]);
+    const plugin = await createRecordingPlugin();
+    const counter = join(fixture.root, '..', 'pushes.log');
+    try {
+      await installCompetingPusher(fixture.root, pathToFileURL(fixture.remote).href, counter, 1, { addsPackage: true });
+
+      const outcome = await releaseWorkspace({ root: fixture.root, env: releaseEnv(), plugins: [...SINGLE_FIXTURE_PLUGINS, plugin.modulePath], commitStrategy: 'single' });
+
+      expect(outcome.packages.map((pkg) => pkg.name)).toEqual(['@fixture/a', '@fixture/added']);
+      expect(outcome.packages.find((pkg) => pkg.name === '@fixture/a')).toMatchObject({ released: true, version: '1.1.0' });
     } finally {
       await plugin.remove();
       await fixture.remove();

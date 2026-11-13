@@ -7,6 +7,7 @@ import { isJsonObject } from './json';
 import { type PublishPluginSpec } from './plugins';
 import { resumeWorkspaceRelease } from './gate-publish';
 import { releaseWorkspace, type ReleaseWorkspaceOptions } from './release';
+import { RELEASE_COMMIT_TRAILER } from './release-commit';
 import { releaseEnv } from './release-env-fixture';
 import { TestTimeoutMs } from './test-timeouts';
 
@@ -67,7 +68,7 @@ async function writeNotesPlugin(directory: string): Promise<{ readonly modulePat
 }
 
 const NPM_WITHOUT_PUBLISH: PublishPluginSpec = ['@semantic-release/npm', { npmPublish: false }];
-const GIT_RELEASE_COMMIT: PublishPluginSpec = ['@semantic-release/git', { assets: ['package.json'], message: 'chore(release): ${nextRelease.gitTag} [skip ci]' }];
+const GIT_RELEASE_COMMIT: PublishPluginSpec = ['@semantic-release/git', { assets: ['package.json'], message: `chore(release): \${nextRelease.gitTag} [skip ci]\n\n${RELEASE_COMMIT_TRAILER}` }];
 
 /** Releases for real after `commits` and returns the notes each release was published with, keyed by tag. */
 async function releaseNotes(commits: readonly FixtureCommit[], packageSources: ReleaseWorkspaceOptions['packageSources'], commitStrategy: 'per-package' | 'single' = 'per-package'): Promise<ReadonlyMap<string, string>> {
@@ -187,5 +188,56 @@ describe('packageSources in the release notes', () => {
   it('lists the extra-path commit under commitStrategy single', async () => {
     const notes = await releaseNotes([crateCommit], sourcesOfA, 'single');
     expect(notes.get('@fixture/a@1.0.1')).toContain('correct the parser');
+  }, TestTimeoutMs.Long);
+});
+
+describe('packageSources with the release commit message', () => {
+  it('refuses a @semantic-release/git message that lacks the release trailer, naming the line to add', async () => {
+    const fixture = await createWorkspaceFixture(packages, [crateCommit]);
+    try {
+      const plugins: readonly PublishPluginSpec[] = [NPM_WITHOUT_PUBLISH, ['@semantic-release/git', { assets: ['package.json'], message: 'chore(release): ${nextRelease.gitTag} [skip ci]' }]];
+      await expect(releaseWorkspace({ root: fixture.root, env: releaseEnv(), dryRun: true, plugins, packageSources: sourcesOfA })).rejects.toThrow(/Workspace-Release-Commit: true/);
+    } finally {
+      await fixture.remove();
+    }
+  }, TestTimeoutMs.Long);
+
+  it('refuses a @semantic-release/git entry with no message at all', async () => {
+    const fixture = await createWorkspaceFixture(packages, [crateCommit]);
+    try {
+      await expect(releaseWorkspace({ root: fixture.root, env: releaseEnv(), dryRun: true, plugins: ['@semantic-release/git'], packageSources: sourcesOfA })).rejects.toThrow(/Workspace-Release-Commit: true/);
+    } finally {
+      await fixture.remove();
+    }
+  }, TestTimeoutMs.Long);
+
+  it('leaves a custom message alone when no packageSources are configured', async () => {
+    const fixture = await createWorkspaceFixture(packages, [crateCommit]);
+    try {
+      const plugins: readonly PublishPluginSpec[] = [NPM_WITHOUT_PUBLISH, ['@semantic-release/git', { assets: ['package.json'], message: 'chore(release): custom' }]];
+      await expect(releaseWorkspace({ root: fixture.root, env: releaseEnv(), dryRun: true, plugins })).resolves.toBeDefined();
+    } finally {
+      await fixture.remove();
+    }
+  }, TestTimeoutMs.Long);
+
+  it('logs the warning about a path that no longer names a tracked file through the run log', async () => {
+    const fixture = await createWorkspaceFixture(packages, [seedCommit, { message: 'chore: remove the crate', remove: ['rust/crates/shared/src/lib.rs'] }]);
+    try {
+      const lines: string[] = [];
+      await releaseWorkspace({
+        root: fixture.root,
+        env: releaseEnv(),
+        dryRun: true,
+        plugins: [],
+        packageSources: sourcesOfA,
+        log: (message) => {
+          lines.push(message);
+        },
+      });
+      expect(lines.some((line) => line.includes('@fixture/a: "rust/crates/shared" matches no tracked file'))).toBe(true);
+    } finally {
+      await fixture.remove();
+    }
   }, TestTimeoutMs.Long);
 });
