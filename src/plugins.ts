@@ -72,6 +72,12 @@ export const SINGLE_COMMIT_DEFAULT_PUBLISH_PLUGINS: readonly PublishPluginSpec[]
 
 const STEP_PLUGINS_THE_ORCHESTRATOR_OWNS: ReadonlySet<string> = new Set(['@semantic-release/commit-analyzer', '@semantic-release/release-notes-generator']);
 
+/** The commits a package's release is computed from: `commits` is what the analyser and the notes see, and `own` is the subset under the package's own directory, the only commits whose dependency-bump trailers can describe this package. */
+interface ResolvedCommits {
+  readonly commits: readonly Commit[];
+  readonly own: readonly Commit[];
+}
+
 export interface ScopedPlugins {
   readonly analyzeCommits: (pluginConfig: Record<string, unknown>, context: AnalyzeCommitsContext & { cwd: string }) => Promise<string | false | undefined>;
   readonly generateNotes: (pluginConfig: Record<string, unknown>, context: GenerateNotesInput & { cwd: string }) => Promise<string | false | undefined>;
@@ -111,7 +117,7 @@ export function createScopedPlugins(scope: {
     return sources.length === 0 ? new Set() : commitsTouching(from, toPathspecs(sources), { cwd });
   }
 
-  async function commitsForPackage(context: Pick<AnalyzeCommitsContext, 'commits'> & { readonly lastRelease: unknown; readonly cwd: string }): Promise<readonly Commit[]> {
+  async function commitsForPackage(context: Pick<AnalyzeCommitsContext, 'commits'> & { readonly lastRelease: unknown; readonly cwd: string }): Promise<ResolvedCommits> {
     // A lastRelease with no gitHead means semantic-release fetched the package's whole history, so the path map is built over the same unbounded range.
     const from = hasGitHead(context.lastRelease) ? context.lastRelease.gitHead : undefined;
     if (cached === undefined || cached.from !== from) {
@@ -120,21 +126,21 @@ export function createScopedPlugins(scope: {
     }
     const [paths, onSources] = await cached.scan;
     const inDirectory = new Set(filterCommitsToDirectory(context.commits, paths, scope.pkg.repoRelativeDirectory).map((commit) => commit.hash));
-    // Filtering the semantic-release list again, not concatenating, keeps the commits in the order semantic-release supplied them.
-    const commits = context.commits.filter((commit) => inDirectory.has(commit.hash) || onSources.has(commit.hash));
+    // Filtering the semantic-release list again, not concatenating, keeps the commits in the order semantic-release supplied them. A commit the orchestrator wrote to record a dependency bump never counts through `sources`: it touches the lockfile and the dependent's directory, so a source path covering either would otherwise credit it to a package whose own dependency did not change, and the forced patch it implies would release that package on every run.
+    const commits = context.commits.filter((commit) => inDirectory.has(commit.hash) || (onSources.has(commit.hash) && parseDependencyBumpTrailer(commit.message) === undefined));
     scope.onCommitsResolved?.(commits);
-    return commits;
+    return { commits, own: context.commits.filter((commit) => inDirectory.has(commit.hash)) };
   }
 
   return {
     async analyzeCommits(_pluginConfig, context) {
-      const commits = await commitsForPackage(context);
+      const { commits, own: ownCommits } = await commitsForPackage(context);
       const analysed = await analyzeCommits(scope.analyzeCommitsConfig, { ...context, commits });
       if (typeof analysed === 'string' && !isReleaseType(analysed)) {
         throw new ReleaseConfigurationError(`@semantic-release/commit-analyzer returned "${analysed}" for ${scope.pkg.name}, which is not a semantic-release release type.`);
       }
       const own = typeof analysed === 'string' ? analysed : undefined;
-      const bumps = mergeDependencyBumps(scope.bumps.bumpsFor(scope.pkg.name), commits);
+      const bumps = mergeDependencyBumps(scope.bumps.bumpsFor(scope.pkg.name), ownCommits);
       carriedReleaseType = releaseTypeOfBumps(bumps.filter((bump) => scope.bundled?.carried.has(bump.dependency) === true));
       const bundledBumps = bumps.filter((bump) => scope.bundled?.releaseTypeFrom.has(bump.dependency) === true);
       const fromBundled = releaseTypeOfBumps(bundledBumps);
@@ -160,9 +166,9 @@ export function createScopedPlugins(scope: {
     },
 
     async generateNotes(_pluginConfig, context) {
-      const commits = await commitsForPackage(context);
+      const { commits, own } = await commitsForPackage(context);
       const notes = await generateNotes(scope.generateNotesConfig, { ...context, commits });
-      const bumps = mergeDependencyBumps(scope.bumps.bumpsFor(scope.pkg.name), commits);
+      const bumps = mergeDependencyBumps(scope.bumps.bumpsFor(scope.pkg.name), own);
       if (bumps.length === 0) {
         return notes;
       }
@@ -186,7 +192,7 @@ function describeBundledBumps(bumps: readonly DependencyBump[]): string {
 }
 
 /**
- * Combines the bumps recorded in memory earlier in the current run with bumps recovered from the package's own filtered commit history (a bump commit from this run, already visible because it touches the package's own directory, or one left over from a previous run), de-duplicated by dependency name. The in-memory entry wins on overlap: it carries the manifest field and dependent name a `resolved-at-publish` bump has no commit to recover from at all.
+ * Combines the bumps recorded in memory earlier in the current run with bumps recovered from the package's own filtered commit history (a bump commit from this run, already visible because it touches the package's own directory (read from the package's own directory only, never from commits `sources` added, since the trailer does not name the dependent), or one left over from a previous run), de-duplicated by dependency name. The in-memory entry wins on overlap: it carries the manifest field and dependent name a `resolved-at-publish` bump has no commit to recover from at all.
  */
 function mergeDependencyBumps(runtimeBumps: readonly DependencyBump[], commits: readonly Commit[]): readonly DependencyBump[] {
   const byDependency = new Map<string, DependencyBump>();
