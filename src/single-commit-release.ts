@@ -19,6 +19,7 @@ import {
 } from './git';
 import { type BundledDependencies, resolveBundledDependencies } from './bundling';
 import { loadPackageSources } from './package-sources';
+import { RELEASE_COMMIT_TRAILER } from './release-commit';
 import { buildDependencyGraph, mustGet, orderedPackages, topologicalOrder, validateDependencyRanges, type DependencyGraph } from './graph';
 import { writeDependencyRange } from './manifest';
 import { packageName } from './package-name';
@@ -398,7 +399,7 @@ function describeCombinedCommit(planned: readonly PlannedPackageRelease[]): stri
     const bumpSuffix = bumpDescriptions.length === 0 ? '' : ` (dependenc${bumpDescriptions.length === 1 ? 'y' : 'ies'} bumped: ${bumpDescriptions.join(', ')})`;
     return `- ${release.gitTag} (${release.type})${bumpSuffix}`;
   });
-  return ['chore(release): batch release [skip ci]', '', ...lines].join('\n');
+  return ['chore(release): batch release [skip ci]', '', ...lines, '', RELEASE_COMMIT_TRAILER].join('\n');
 }
 
 interface SharedRunContext {

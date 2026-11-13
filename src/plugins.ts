@@ -9,6 +9,7 @@ import { parseDependencyBumpTrailer } from './dependency-bump-commit';
 import { ReleaseConfigurationError } from './errors';
 import { changedPathsSince, commitsTouching } from './git';
 import { toPathspecs } from './package-sources';
+import { RELEASE_COMMIT_TRAILER, isReleaseCommitMessage } from './release-commit';
 import { highestReleaseType, isReleaseType, raiseReleaseType } from './release-type';
 import type { WorkspacePackage } from './workspace';
 
@@ -62,7 +63,7 @@ export const DEFAULT_PUBLISH_PLUGINS: readonly PublishPluginSpec[] = [
     {
       assets: ['CHANGELOG.md', 'package.json'],
       // nextRelease.gitTag is "<package name>@<version>" under this tool's tagFormat, so the release commit names the package it belongs to without needing anything beyond the standard template variables.
-      message: 'chore(release): ${nextRelease.gitTag} [skip ci]',
+      message: `chore(release): \${nextRelease.gitTag} [skip ci]\n\n${RELEASE_COMMIT_TRAILER}`,
     },
   ],
 ];
@@ -71,12 +72,6 @@ export const DEFAULT_PUBLISH_PLUGINS: readonly PublishPluginSpec[] = [
 export const SINGLE_COMMIT_DEFAULT_PUBLISH_PLUGINS: readonly PublishPluginSpec[] = ['@semantic-release/changelog', '@semantic-release/npm', '@semantic-release/github'];
 
 const STEP_PLUGINS_THE_ORCHESTRATOR_OWNS: ReadonlySet<string> = new Set(['@semantic-release/commit-analyzer', '@semantic-release/release-notes-generator']);
-
-/** The commits a package's release is computed from: `commits` is what the analyser and the notes see, and `own` is the subset under the package's own directory, the only commits whose dependency-bump trailers can describe this package. */
-interface ResolvedCommits {
-  readonly commits: readonly Commit[];
-  readonly own: readonly Commit[];
-}
 
 export interface ScopedPlugins {
   readonly analyzeCommits: (pluginConfig: Record<string, unknown>, context: AnalyzeCommitsContext & { cwd: string }) => Promise<string | false | undefined>;
@@ -117,7 +112,7 @@ export function createScopedPlugins(scope: {
     return sources.length === 0 ? new Set() : commitsTouching(from, toPathspecs(sources), { cwd });
   }
 
-  async function commitsForPackage(context: Pick<AnalyzeCommitsContext, 'commits'> & { readonly lastRelease: unknown; readonly cwd: string }): Promise<ResolvedCommits> {
+  async function commitsForPackage(context: Pick<AnalyzeCommitsContext, 'commits'> & { readonly lastRelease: unknown; readonly cwd: string }): Promise<readonly Commit[]> {
     // A lastRelease with no gitHead means semantic-release fetched the package's whole history, so the path map is built over the same unbounded range.
     const from = hasGitHead(context.lastRelease) ? context.lastRelease.gitHead : undefined;
     if (cached === undefined || cached.from !== from) {
@@ -126,21 +121,21 @@ export function createScopedPlugins(scope: {
     }
     const [paths, onSources] = await cached.scan;
     const inDirectory = new Set(filterCommitsToDirectory(context.commits, paths, scope.pkg.repoRelativeDirectory).map((commit) => commit.hash));
-    // Filtering the semantic-release list again, not concatenating, keeps the commits in the order semantic-release supplied them. A commit the orchestrator wrote to record a dependency bump never counts through `sources`: it touches the lockfile and the dependent's directory, so a source path covering either would otherwise credit it to a package whose own dependency did not change, and the forced patch it implies would release that package on every run.
-    const commits = context.commits.filter((commit) => inDirectory.has(commit.hash) || (onSources.has(commit.hash) && parseDependencyBumpTrailer(commit.message) === undefined));
+    // Filtering the semantic-release list again, not concatenating, keeps the commits in the order semantic-release supplied them. A commit the orchestrator wrote (a dependency bump, which touches the lockfile and the dependent's directory, or a release commit, which rewrites the released package's manifest) never counts through `sources`: a source path covering any of those would otherwise credit it to a package that did not change, and the release it implies would repeat on every run. Because such commits never widen the list, the bump trailers read below come only from commits under the package's own directory.
+    const commits = context.commits.filter((commit) => inDirectory.has(commit.hash) || (onSources.has(commit.hash) && !writtenByOrchestrator(commit.message)));
     scope.onCommitsResolved?.(commits);
-    return { commits, own: context.commits.filter((commit) => inDirectory.has(commit.hash)) };
+    return commits;
   }
 
   return {
     async analyzeCommits(_pluginConfig, context) {
-      const { commits, own: ownCommits } = await commitsForPackage(context);
+      const commits = await commitsForPackage(context);
       const analysed = await analyzeCommits(scope.analyzeCommitsConfig, { ...context, commits });
       if (typeof analysed === 'string' && !isReleaseType(analysed)) {
         throw new ReleaseConfigurationError(`@semantic-release/commit-analyzer returned "${analysed}" for ${scope.pkg.name}, which is not a semantic-release release type.`);
       }
       const own = typeof analysed === 'string' ? analysed : undefined;
-      const bumps = mergeDependencyBumps(scope.bumps.bumpsFor(scope.pkg.name), ownCommits);
+      const bumps = mergeDependencyBumps(scope.bumps.bumpsFor(scope.pkg.name), commits);
       carriedReleaseType = releaseTypeOfBumps(bumps.filter((bump) => scope.bundled?.carried.has(bump.dependency) === true));
       const bundledBumps = bumps.filter((bump) => scope.bundled?.releaseTypeFrom.has(bump.dependency) === true);
       const fromBundled = releaseTypeOfBumps(bundledBumps);
@@ -166,9 +161,9 @@ export function createScopedPlugins(scope: {
     },
 
     async generateNotes(_pluginConfig, context) {
-      const { commits, own } = await commitsForPackage(context);
+      const commits = await commitsForPackage(context);
       const notes = await generateNotes(scope.generateNotesConfig, { ...context, commits });
-      const bumps = mergeDependencyBumps(scope.bumps.bumpsFor(scope.pkg.name), own);
+      const bumps = mergeDependencyBumps(scope.bumps.bumpsFor(scope.pkg.name), commits);
       if (bumps.length === 0) {
         return notes;
       }
@@ -182,6 +177,11 @@ export function createScopedPlugins(scope: {
   };
 }
 
+/** Whether the orchestrator wrote this commit: it carries the dependency-bump trailer or the release-commit trailer. */
+function writtenByOrchestrator(message: string): boolean {
+  return parseDependencyBumpTrailer(message) !== undefined || isReleaseCommitMessage(message);
+}
+
 /** The highest release type among `bumps`, or `undefined` when there are none. A bump with no recorded type counts as the patch it always forced. */
 function releaseTypeOfBumps(bumps: readonly DependencyBump[]): ReleaseType | undefined {
   return highestReleaseType(bumps.map((bump) => bump.releaseType ?? 'patch'));
@@ -192,7 +192,7 @@ function describeBundledBumps(bumps: readonly DependencyBump[]): string {
 }
 
 /**
- * Combines the bumps recorded in memory earlier in the current run with bumps recovered from the package's own filtered commit history (a bump commit from this run, already visible because it touches the package's own directory (read from the package's own directory only, never from commits `sources` added, since the trailer does not name the dependent), or one left over from a previous run), de-duplicated by dependency name. The in-memory entry wins on overlap: it carries the manifest field and dependent name a `resolved-at-publish` bump has no commit to recover from at all.
+ * Combines the bumps recorded in memory earlier in the current run with bumps recovered from the package's own filtered commit history (a bump commit from this run, already visible because it touches the package's own directory, or one left over from a previous run), de-duplicated by dependency name. The in-memory entry wins on overlap: it carries the manifest field and dependent name a `resolved-at-publish` bump has no commit to recover from at all.
  */
 function mergeDependencyBumps(runtimeBumps: readonly DependencyBump[], commits: readonly Commit[]): readonly DependencyBump[] {
   const byDependency = new Map<string, DependencyBump>();
