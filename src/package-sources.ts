@@ -1,7 +1,8 @@
 import { ReleaseConfigurationError } from './errors';
-import { type GitCommandOptions, pathspecsEverMatched } from './git';
+import { type GitCommandOptions, pathspecStatus } from './git';
 import { type DependencyGraph } from './graph';
 import { isJsonObject, isStringArray } from './json';
+import { packageName } from './package-name';
 
 /** The extra repository paths whose commits count towards each package's release, by package name; see `resolvePackageSources`. Every package in the graph has an entry, empty for one that names none. */
 export type PackageSourcePatterns = ReadonlyMap<string, readonly string[]>;
@@ -13,16 +14,23 @@ export type PackageSourcePatterns = ReadonlyMap<string, readonly string[]>;
  *
  * `undefined` leaves every package scoped to its own directory alone. Throws `ReleaseConfigurationError` for a name that is not a package in the workspace, a list that is not an array of strings, and each pattern rejected above, listing every offence at once.
  */
-export function resolvePackageSources(graph: DependencyGraph, packageSources: Readonly<Record<string, readonly string[]>> | undefined): PackageSourcePatterns {
+export function resolvePackageSources(graph: DependencyGraph, packageSources: unknown): PackageSourcePatterns {
   const resolved = new Map<string, readonly string[]>([...graph.packages.keys()].map((name) => [name, []]));
   if (packageSources === undefined) {
     return resolved;
+  }
+  if (!isJsonObject(packageSources)) {
+    throw new ReleaseConfigurationError('packageSources is invalid: must be an object mapping package names to arrays of path strings.');
   }
 
   const problems: string[] = [];
   for (const [name, patterns] of Object.entries(packageSources)) {
     if (!resolved.has(name)) {
       problems.push(`"${name}" is not a package in this workspace (packages: ${[...graph.packages.keys()].join(', ')})`);
+      continue;
+    }
+    if (!isStringArray(patterns)) {
+      problems.push(`${name}: must be an array of path strings`);
       continue;
     }
     const normalised: string[] = [];
@@ -44,15 +52,20 @@ export function resolvePackageSources(graph: DependencyGraph, packageSources: Re
 }
 
 /**
- * `resolvePackageSources`, then a check against the repository that every pattern has matched something: a tracked file now, or a commit that touched it earlier (so a path whose files were all deleted still counts). A pattern that matches nothing in the whole history is almost always a typo, and would otherwise leave the package silently unreleased by changes to the sources it meant, the failure `packageSources` exists to remove. `options.cwd` is any directory inside the repository.
+ * `resolvePackageSources`, then a check against the repository's history for every pattern.
+ *
+ * A pattern that has matched nothing anywhere in history is refused: it is almost always a typo, and would leave the package silently unreleased by changes to the sources it meant, the failure `packageSources` exists to remove. A pattern that matches no tracked file now but did match earlier (every file deleted, or the path renamed away) is accepted and reported through `options.warn`, because refusing it would block releases that are legitimately due: the commits in the range that deleted the files are real changes to the package, and the path may be retired on purpose. The warning is the signal for the other case, a rename after which the pattern still names the old path and later edits under the new one count for nothing. A path a build creates is untracked and never in history, so it is refused too: list the sources the build reads. `options.cwd` is any directory inside the repository.
  */
-export async function loadPackageSources(graph: DependencyGraph, packageSources: Readonly<Record<string, readonly string[]>> | undefined, options: GitCommandOptions): Promise<PackageSourcePatterns> {
+export async function loadPackageSources(graph: DependencyGraph, packageSources: unknown, options: GitCommandOptions & { readonly warn: (message: string) => void }): Promise<PackageSourcePatterns> {
   const resolved = resolvePackageSources(graph, packageSources);
   const unmatched: string[] = [];
   for (const [name, patterns] of resolved) {
     for (const pattern of patterns) {
-      if (!(await pathspecsEverMatched(toPathspecs([pattern]), options))) {
+      const status = await pathspecStatus(toPathspecs([pattern]), options);
+      if (status === 'never') {
         unmatched.push(`${name}: ${JSON.stringify(pattern)} matches no file in this repository's history`);
+      } else if (status === 'historical') {
+        options.warn(`${packageName}: packageSources ${name}: ${JSON.stringify(pattern)} matches no tracked file, only commits in history; if the path was renamed, update it, or later changes under the new path will not release ${name}`);
       }
     }
   }

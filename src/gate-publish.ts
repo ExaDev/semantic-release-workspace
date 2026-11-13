@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import type { BranchSpec, Options, ReleaseType } from 'semantic-release';
 import { detachRelease, resumeRelease, type ReleaseGateState } from '@exadev/release-gate';
 import { type BundledDependencies, resolveBundledDependencies } from './bundling';
-import { loadPackageSources } from './package-sources';
+import type { PackageSourcePatterns } from './package-sources';
 import { WorkspaceReleaseError } from './errors';
 import { sanitizeGitEnv } from './git';
 import { buildDependencyGraph, mustGet, orderedPackages, topologicalOrder, validateDependencyRanges } from './graph';
@@ -35,7 +35,7 @@ export interface DetachedPackageRelease {
 /**
  * The `gatePublish: true` half of `releaseWorkspace`: tags and pushes every due package via `@exadev/release-gate`'s `detachRelease`, but never publishes. Built on the same `runReleaseLoop` the normal per-package path uses, so dependency-range bumps between packages happen identically either way -- only the release call itself (`detachRelease` instead of `semanticRelease`) and how "did it release" gets read differ.
  */
-export async function detachWorkspaceRelease(options: ReleaseWorkspaceOptions): Promise<WorkspaceReleaseOutcome> {
+export async function detachWorkspaceRelease(options: ReleaseWorkspaceOptions, sources: PackageSourcePatterns): Promise<WorkspaceReleaseOutcome> {
   const root = resolve(options.root ?? process.cwd());
   const log = options.log ?? console.log;
   const dryRun = options.dryRun === true;
@@ -54,7 +54,6 @@ export async function detachWorkspaceRelease(options: ReleaseWorkspaceOptions): 
     { requireGitPlugin: !dryRun },
   );
   const bundled = resolveBundledDependencies(graph, options.bundlingPackages);
-  const sources = await loadPackageSources(graph, options.packageSources, { cwd: workspace.root });
   const analyzeCommitsConfig = options.analyzeCommits ?? {};
   const generateNotesConfig = options.generateNotes ?? {};
 

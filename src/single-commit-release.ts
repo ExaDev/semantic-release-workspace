@@ -18,7 +18,7 @@ import {
   workingTreeChanges,
 } from './git';
 import { type BundledDependencies, resolveBundledDependencies } from './bundling';
-import { loadPackageSources } from './package-sources';
+import type { PackageSourcePatterns } from './package-sources';
 import { RELEASE_COMMIT_TRAILER } from './release-commit';
 import { buildDependencyGraph, mustGet, orderedPackages, topologicalOrder, validateDependencyRanges, type DependencyGraph } from './graph';
 import { writeDependencyRange } from './manifest';
@@ -44,13 +44,13 @@ import { DEFAULT_TAG_FORMAT, formatTagForPackage, validateTagFormat } from './ta
  *
  * Why publish is not just another semantic-release() call: semantic-release's own `run()` unconditionally derives `lastRelease` from the newest tag already on the branch matching `tagFormat`, and this mode has, by the time phase 5 runs, already created and pushed that exact tag itself. A second real `semanticRelease()` call would see its own just-created tag as the already-published release and compute the wrong next version from it. Phase 5 instead calls each resolved plugin module's own exported `verifyConditions`/`publish`/`success` functions directly, with a hand-built context -- the same public per-plugin API surface semantic-release's own core calls internally, just invoked without going through the parts of `run()` that assume a not-yet-tagged repository.
  */
-export async function releaseWorkspaceSingleCommit(options: ReleaseWorkspaceOptions): Promise<WorkspaceReleaseOutcome> {
+export async function releaseWorkspaceSingleCommit(options: ReleaseWorkspaceOptions, sources: PackageSourcePatterns): Promise<WorkspaceReleaseOutcome> {
   const log = options.log ?? console.log;
   const maxAttempts = resolvePushAttempts(options.pushAttempts);
   let lastLoss: GitCommandError | undefined;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    const result = await attemptSingleCommitRelease(options);
+    const result = await attemptSingleCommitRelease(options, sources);
     if (result.kind === 'complete') {
       return result.outcome;
     }
@@ -89,7 +89,7 @@ type SingleCommitAttempt =
   | { readonly kind: 'pushed'; readonly outcome: WorkspaceReleaseOutcome; readonly publish: () => Promise<void> }
   | { readonly kind: 'lost'; readonly error: GitCommandError; readonly branch: string; readonly remoteTip: string };
 
-async function attemptSingleCommitRelease(options: ReleaseWorkspaceOptions): Promise<SingleCommitAttempt> {
+async function attemptSingleCommitRelease(options: ReleaseWorkspaceOptions, sources: PackageSourcePatterns): Promise<SingleCommitAttempt> {
   const root = resolve(options.root ?? process.cwd());
   const log = options.log ?? console.log;
   const dryRun = options.dryRun === true;
@@ -112,7 +112,6 @@ async function attemptSingleCommitRelease(options: ReleaseWorkspaceOptions): Pro
     { requireGitPlugin: false, forbidGitPlugin: true },
   );
   const bundled = resolveBundledDependencies(graph, options.bundlingPackages);
-  const sources = await loadPackageSources(graph, options.packageSources, { cwd: workspace.root });
   const analyzeCommitsConfig = options.analyzeCommits ?? {};
   const generateNotesConfig = options.generateNotes ?? {};
   const tagFormat = validateTagFormat(options.tagFormat ?? DEFAULT_TAG_FORMAT);

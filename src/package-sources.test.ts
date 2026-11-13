@@ -72,6 +72,21 @@ describe('resolvePackageSources', () => {
   });
 });
 
+describe('resolvePackageSources shape', () => {
+  it.each([
+    ['a string where a list is expected', { a: 'rust/crates/a' }],
+    ['a null list', { a: null }],
+    ['a list holding a non-string', { a: [1] }],
+  ])('refuses %s, naming the package', (_label, value) => {
+    expect(() => resolvePackageSources(graph, value)).toThrow(ReleaseConfigurationError);
+    expect(() => resolvePackageSources(graph, value)).toThrow(/packageSources is invalid: a: must be an array of path strings/);
+  });
+
+  it.each([null, 'rust', ['rust']])('refuses %j as the whole option', (value) => {
+    expect(() => resolvePackageSources(graph, value)).toThrow(/packageSources is invalid: must be an object mapping package names to arrays of path strings/);
+  });
+});
+
 describe('isPackageSources', () => {
   it('accepts a map of string arrays and nothing else', () => {
     expect(isPackageSources({ a: ['x'], b: [] })).toBe(true);

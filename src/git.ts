@@ -104,13 +104,13 @@ export async function commitsTouching(from: string | undefined, pathspecs: reado
 }
 
 /**
- * Whether any of `pathspecs` has ever matched a path in the history reachable from HEAD: a file tracked at HEAD, or a path some commit touched, so a path whose every file was later deleted still counts. The tracked-file check comes first because it is quick; the history walk only runs for a path with no tracked file, which is either a path that was deleted (it ends at the commit that touched it) or a mistake (it walks the whole history).
+ * How `pathspecs` relate to the repository: `tracked` when a file matching one is tracked at HEAD, `historical` when none is but a commit reachable from HEAD touched one (every file deleted, or the path renamed away), and `never` when nothing ever matched. The tracked-file check comes first because it is quick; the history walk only runs for a path with no tracked file, and walks the whole history only for a path that never matched.
  */
-export async function pathspecsEverMatched(pathspecs: readonly string[], options: GitCommandOptions): Promise<boolean> {
+export async function pathspecStatus(pathspecs: readonly string[], options: GitCommandOptions): Promise<'tracked' | 'historical' | 'never'> {
   if ((await git(['ls-files', '--', ...pathspecs], options)).trim() !== '') {
-    return true;
+    return 'tracked';
   }
-  return (await git(['log', '-1', '--full-history', '--format=%H', 'HEAD', '--', ...pathspecs], options)).trim() !== '';
+  return (await git(['log', '-1', '--full-history', '--format=%H', 'HEAD', '--', ...pathspecs], options)).trim() !== '' ? 'historical' : 'never';
 }
 
 /** The branch a dependency-bump commit will be pushed to. Refuses a detached HEAD by name rather than pushing `HEAD:HEAD` to the remote and watching it fail somewhere less legible. A detached HEAD is a WorkspaceStateError rather than a GitCommandError because the git command itself succeeded: the repository's state is what cannot support the release, and conflating the two would report a working command as a failed one. */
