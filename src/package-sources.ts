@@ -9,7 +9,7 @@ export type PackageSourcePatterns = ReadonlyMap<string, readonly string[]>;
 /**
  * Validates `packageSources` against the workspace and normalises it into one pattern list per package.
  *
- * Each pattern names a path or a glob relative to the git repository's toplevel (the base `git log --name-only` reports against), and counts a commit towards the package when the commit changed that path, a file under it, or a file matching it. Patterns use git's own glob pathspec syntax (`*` within a segment, `**` across segments), so they match files a commit deleted as well as files still on disk. A pattern that escapes the repository (any `..` segment), is absolute, uses a backslash, is empty, names the repository root, or consists only of wildcard segments (`*`, `**`, `?`) is rejected, because each would either read outside the repository or make every commit count for the package. A path segment cannot contain a literal glob character: the backslash that would escape one is refused.
+ * Each pattern names a path or a glob relative to the git repository's toplevel (the base `git log --name-only` reports against), and counts a commit towards the package when the commit changed that path, a file under it, or a file matching it. Patterns use git's own glob pathspec syntax (`*` within a segment, `**` across segments), so they match files a commit deleted as well as files still on disk. A pattern that escapes the repository (any `..` segment), is absolute, uses a backslash, is empty, names the repository root, or consists only of `*`, `**` and `?` segments is rejected, because each would either read outside the repository or make every commit count for the package. A path segment cannot contain a literal glob character: the backslash that would escape one is refused.
  *
  * `undefined` leaves every package scoped to its own directory alone. Throws `ReleaseConfigurationError` for a name that is not a package in the workspace, a list that is not an array of strings, and each pattern rejected above, listing every offence at once.
  */
@@ -82,7 +82,7 @@ function normalisePattern(pattern: string): string | { readonly problem: string 
     return { problem: 'names no path below the repository root, so every commit would count for the package' };
   }
   if (segments.every((segment) => /^[*?]+$/.test(segment))) {
-    return { problem: 'has no literal path segment, so it would match every path in the repository; name the directory the sources live under' };
+    return { problem: 'is made only of `*`, `**` and `?` segments, so it would match every path in the repository; name the directory the sources live under' };
   }
   return segments.join('/');
 }
