@@ -47,18 +47,20 @@ describe('resolvePackageSources', () => {
     ['the repository root', '.', /names no path below the repository root/],
     ['an empty string', '', /names no path below the repository root/],
     ['a backslash path', 'rust\\crates', /contains a backslash/],
-    ['a lone wildcard', '*', /has no literal path segment/],
-    ['a lone double wildcard', '**', /has no literal path segment/],
-    ['a wildcard directory with a double wildcard', '*/**', /has no literal path segment/],
-    ['a double wildcard with a wildcard file', '**/*', /has no literal path segment/],
-    ['a single-character wildcard', '?/**', /has no literal path segment/],
+    ['a lone wildcard', '*', /is made only of `\*`, `\*\*` and `\?` segments/],
+    ['a current-directory wildcard', './**', /is made only of/],
+    ['a lone single-character wildcard', '?', /is made only of/],
+    ['a lone double wildcard', '**', /is made only of `\*`, `\*\*` and `\?` segments/],
+    ['a wildcard directory with a double wildcard', '*/**', /is made only of `\*`, `\*\*` and `\?` segments/],
+    ['a double wildcard with a wildcard file', '**/*', /is made only of `\*`, `\*\*` and `\?` segments/],
+    ['a single-character wildcard', '?/**', /is made only of `\*`, `\*\*` and `\?` segments/],
   ])('rejects %s', (_label, pattern, message) => {
     expect(() => resolvePackageSources(graph, { a: [pattern] })).toThrow(ReleaseConfigurationError);
     expect(() => resolvePackageSources(graph, { a: [pattern] })).toThrow(message);
   });
 
   it('names the package and the pattern when it refuses a pattern with no literal segment', () => {
-    expect(() => resolvePackageSources(graph, { b: ['**/*'] })).toThrow(/b: "\*\*\/\*" has no literal path segment/);
+    expect(() => resolvePackageSources(graph, { b: ['**/*'] })).toThrow(/b: "\*\*\/\*" is made only of `\*`, `\*\*` and `\?` segments/);
   });
 
   it.each(['rust/**', 'rust/*/src', '**/src', '*.rs', 'rust/crates/*'])('accepts %s, which names a literal segment or part of one', (pattern) => {
