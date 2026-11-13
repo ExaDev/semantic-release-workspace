@@ -270,10 +270,12 @@ describe('createProgram', () => {
     const release = createProgram().commands.find((command) => command.name() === 'release');
     expect(release).toBeDefined();
     release?.exitOverride().configureOutput({ writeErr: () => undefined });
-    await expect(release?.parseAsync(['--tag-format', '${name}'], { from: 'user' })).rejects.toMatchObject({
-      code: 'commander.invalidArgument',
-      message: expect.stringMatching(/--tag-format.*must contain '\$\{version\}'/) as unknown,
-    });
+    const failure = await release?.parseAsync(['--tag-format', '${name}'], { from: 'user' }).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    expect(failure).toMatchObject({ code: 'commander.invalidArgument' });
+    expect(failure instanceof Error ? failure.message : '').toMatch(/--tag-format.*must contain '\$\{version\}'/);
   });
 });
 

@@ -133,12 +133,17 @@ describe('commitsTouching', () => {
     }
   }, TestTimeoutMs.Short);
 
-  it.each(['GIT_LITERAL_PATHSPECS', 'GIT_NOGLOB_PATHSPECS', 'GIT_ICASE_PATHSPECS'])('gives the same answer with %s set in the caller environment', async (variable) => {
+  it.each([
+    ['GIT_LITERAL_PATHSPECS', 'rust/crates/*/src', 1],
+    ['GIT_NOGLOB_PATHSPECS', 'rust/crates/*/src', 1],
+    // A pattern differing in case from the file: an unsanitised variable would make it match.
+    ['GIT_ICASE_PATHSPECS', 'Rust/crates/*/src', 0],
+  ])('gives the same answer with %s set in the caller environment', async (variable, pattern, expected) => {
     const fixture = await createWorkspaceFixture(onePackage, commits, { workspaceSubdirectory: 'mono' });
     try {
       vi.stubEnv(variable, '1');
-      const hashes = await commitsTouching(undefined, [':(top,glob)rust/crates/*/src', ':(top,glob)rust/crates/*/src/**'], { cwd: fixture.root });
-      expect(hashes.size).toBe(1);
+      const hashes = await commitsTouching(undefined, [`:(top,glob)${pattern}`, `:(top,glob)${pattern}/**`], { cwd: fixture.root });
+      expect(hashes.size).toBe(expected);
     } finally {
       vi.unstubAllEnvs();
       await fixture.remove();
