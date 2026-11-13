@@ -2,7 +2,7 @@ import { resolve } from 'node:path';
 import semanticRelease from 'semantic-release';
 import type { BranchSpec, Options, ReleaseType, Result } from 'semantic-release';
 import { type BundledDependencies, resolveBundledDependencies } from './bundling';
-import { loadPackageSources, type PackageSourcePatterns } from './package-sources';
+import { loadPackageSources, resolvePackageSources } from './package-sources';
 import { formatDependencyBumpMessage } from './dependency-bump-commit';
 import { releasePackageAcrossBranchMoves, type BranchTracker } from './branch-integration';
 import { ReleaseConfigurationError, WorkspaceReleaseError, WorkspaceStateError } from './errors';
@@ -11,6 +11,7 @@ import { buildDependencyGraph, mustGet, orderedPackages, topologicalOrder, valid
 import { packageName } from './package-name';
 import {
   type DependencyBump,
+  assertReleaseCommitTrailers,
   DEFAULT_PUBLISH_PLUGINS,
   registryPublishStep,
   resolveWorkspacePublishPlugins,
@@ -145,31 +146,39 @@ export async function releaseWorkspace(options: ReleaseWorkspaceOptions = {}): P
   const commitStrategy = options.commitStrategy ?? 'per-package';
   if (options.gatePublish === true && commitStrategy === 'single') {
     throw new ReleaseConfigurationError(
-      'gatePublish is not supported together with commitStrategy: "single" -- single-commit-release.ts\'s tag/publish machinery is entirely bespoke and never goes through semantic-release\'s own run(), so it has no insertion point for release-gate\'s detach/resume primitives.',
+      'gatePublish is not supported together with commitStrategy: "single": single-commit-release.ts\'s tag/publish machinery is entirely bespoke and never goes through semantic-release\'s own run(), so it has no insertion point for release-gate\'s detach/resume primitives.',
     );
   }
-  // Loaded and validated once, before recovery or anything else with an outward effect, and handed to every stage below.
-  const sources = await loadSourcesOf(options);
+  // Validated before recovery or anything else with an outward effect. Each stage then derives its own map from its own graph, with no further git work.
+  await validatePackageSources(options, commitStrategy);
   if (options.gatePublish === true) {
-    return detachWorkspaceRelease(options, sources);
+    return detachWorkspaceRelease(options);
   }
 
-  const recovered = await recoverUnpublishedWorkspaceReleases(options, commitStrategy, sources);
-  const outcome = commitStrategy === 'single' ? await releaseWorkspaceSingleCommit(options, sources) : await releaseWorkspacePerPackage(options, sources);
+  const recovered = await recoverUnpublishedWorkspaceReleases(options, commitStrategy);
+  const outcome = commitStrategy === 'single' ? await releaseWorkspaceSingleCommit(options) : await releaseWorkspacePerPackage(options);
   return { ...outcome, recovered };
 }
 
-/** Validates `options.packageSources` against the workspace and the repository's history (see `loadPackageSources`), warning through `options.log` about a pattern that no longer names a tracked file. */
-async function loadSourcesOf(options: ReleaseWorkspaceOptions): Promise<PackageSourcePatterns> {
+/**
+ * Validates `options.packageSources` against the workspace and the repository's history (see `loadPackageSources`), warning through `options.log` about a pattern that no longer names a tracked file, and, when any package lists sources, checks that every `@semantic-release/git` release commit message carries `RELEASE_COMMIT_TRAILER` (see `assertReleaseCommitTrailers`). Does nothing, and runs no git command, when the option is absent.
+ */
+async function validatePackageSources(options: ReleaseWorkspaceOptions, commitStrategy: CommitStrategy): Promise<void> {
+  if (options.packageSources === undefined) {
+    return;
+  }
   const workspace = await discoverWorkspace(resolve(options.root ?? process.cwd()));
   const graph = buildDependencyGraph(workspace.packages);
-  return loadPackageSources(graph, options.packageSources, { cwd: workspace.root, warn: options.log ?? console.log });
+  const sources = await loadPackageSources(graph, options.packageSources, { cwd: workspace.root, warn: options.log ?? console.log });
+  if (commitStrategy === 'per-package' && [...sources.values()].some((patterns) => patterns.length > 0)) {
+    assertReleaseCommitTrailers(options.plugins ?? DEFAULT_PUBLISH_PLUGINS, options.packagePlugins);
+  }
 }
 
 /**
  * Publishes every release whose tag exists but whose version its registry does not hold, before the run releases anything new: see `recoverUnpublishedReleases`. Each package's publishing intent and publish plugins are the ones `commitStrategy` gives it for a new release, and a recovered release is reported through `onPublished` like a new one. A failure stops the run here, so nothing new is released on top of a release that is still missing.
  */
-async function recoverUnpublishedWorkspaceReleases(options: ReleaseWorkspaceOptions, commitStrategy: CommitStrategy, sources: PackageSourcePatterns): Promise<readonly TaggedRelease[]> {
+async function recoverUnpublishedWorkspaceReleases(options: ReleaseWorkspaceOptions, commitStrategy: CommitStrategy): Promise<readonly TaggedRelease[]> {
   const root = resolve(options.root ?? process.cwd());
   const log = options.log ?? console.log;
   const env = sanitizeGitEnv(options.env ?? process.env);
@@ -196,6 +205,7 @@ async function recoverUnpublishedWorkspaceReleases(options: ReleaseWorkspaceOpti
     return recover(options.recoveryPublisher);
   }
 
+  const sources = resolvePackageSources(graph, options.packageSources);
   const publisher = createTaggedCommitPublisher({
     repoRoot,
     env,
@@ -221,7 +231,7 @@ async function recoverUnpublishedWorkspaceReleases(options: ReleaseWorkspaceOpti
 }
 
 /** `commitStrategy: 'per-package'`: see `releaseWorkspace`. */
-async function releaseWorkspacePerPackage(options: ReleaseWorkspaceOptions, sources: PackageSourcePatterns): Promise<WorkspaceReleaseOutcome> {
+async function releaseWorkspacePerPackage(options: ReleaseWorkspaceOptions): Promise<WorkspaceReleaseOutcome> {
   const root = resolve(options.root ?? process.cwd());
   const log = options.log ?? console.log;
   const dryRun = options.dryRun === true;
@@ -241,6 +251,7 @@ async function releaseWorkspacePerPackage(options: ReleaseWorkspaceOptions, sour
     { requireGitPlugin: !dryRun },
   );
   const bundled = resolveBundledDependencies(graph, options.bundlingPackages);
+  const sources = resolvePackageSources(graph, options.packageSources);
   const analyzeCommitsConfig = options.analyzeCommits ?? {};
   const generateNotesConfig = options.generateNotes ?? {};
 
@@ -400,7 +411,7 @@ const LOCKFILE_FILENAME = 'pnpm-lock.yaml';
 /**
  * Rewrites the released package's range in every dependent's manifest, immediately after the release and before any dependent's own turn.
  *
- * The bump is committed (and pushed) right away rather than staged, because a dependent's semantic-release run analyses git history, not the working tree: an uncommitted bump would be invisible to its commit analysis, and would be stranded uncommitted if the dependent then released nothing -- a manifest that names versions the registry has never seen. Committing immediately means the dependent's own run sees the bump commit (it touches the dependent's directory (and the root lockfile), so it passes that dependent's path filter), the forced-patch logic in the scoped analyzer covers the case where that bump is the dependent's only change, and a run interrupted partway leaves the remote describing exactly what was published. Pushing immediately mirrors what semantic-release itself does with release commits. The lockfile is regenerated (`pnpm install --lockfile-only`) and committed alongside the manifest for the same reason: a manifest bump committed without it leaves `pnpm-lock.yaml` naming the old range, which `pnpm install --frozen-lockfile` (what CI runs) then rejects.
+ * The bump is committed (and pushed) right away rather than staged, because a dependent's semantic-release run analyses git history, not the working tree: an uncommitted bump would be invisible to its commit analysis, and would be stranded uncommitted if the dependent then released nothing: a manifest that names versions the registry has never seen. Committing immediately means the dependent's own run sees the bump commit (it touches the dependent's directory and the root lockfile, so it passes that dependent's path filter), the forced-patch logic in the scoped analyzer covers the case where that bump is the dependent's only change, and a run interrupted partway leaves the remote describing exactly what was published. Pushing immediately mirrors what semantic-release itself does with release commits. The lockfile is regenerated (`pnpm install --lockfile-only`) and committed alongside the manifest for the same reason: a manifest bump committed without it leaves `pnpm-lock.yaml` naming the old range, which `pnpm install --frozen-lockfile` (what CI runs) then rejects.
  */
 async function bumpDependents(released: WorkspacePackage, release: { readonly version: string; readonly releaseType: ReleaseType }, graph: DependencyGraph, options: {
   readonly workspace: Workspace;
