@@ -46,8 +46,8 @@ export function createTaggedCommitPublisher(context: {
   /** Index into each package's `plugins` of its registry publish step; see `registryPublishStep`. */
   readonly registryStep: (pkg: WorkspacePackage) => number;
   readonly generateNotesConfig: Record<string, unknown>;
-  /** The extra source paths of each package, so the regenerated notes list the same commits the release's own notes did. */
-  readonly sources: PackageSourcePatterns;
+  /** The extra source paths of each package, so the regenerated notes list the same commits the release's own notes did. Omitted, every package is scoped to its own directory. */
+  readonly sources?: PackageSourcePatterns;
 }): TaggedCommitPublisher {
   const { repoRoot, env, log } = context;
   const checkouts = new Map<string, Promise<string>>();
@@ -114,7 +114,7 @@ export function createTaggedCommitPublisher(context: {
         analyzeCommitsConfig: {},
         generateNotesConfig: context.generateNotesConfig,
         bumps: { bumpsFor: () => [] },
-        sources: mustGet(context.sources, pkg.name, 'package sources'),
+        sources: context.sources?.get(pkg.name),
         onCommitsResolved: (resolved) => {
           scopedCommits = resolved;
         },
