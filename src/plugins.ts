@@ -320,6 +320,23 @@ export function resolveWorkspacePublishPlugins(
   return new Map(packages.map((pkg) => [pkg.name, resolvedOverrides.get(pkg.name) ?? (pkg.private ? forPrivatePackages : workspaceWide)]));
 }
 
+/**
+ * Refuses a `@semantic-release/git` entry whose `message` does not end with `RELEASE_COMMIT_TRAILER`, in the workspace-wide list or any `packagePlugins` list. A release commit without it is not recognised as the orchestrator's own, so with `packageSources` set it would count for any package whose sources cover the released package's directory, and a project that maps `chore` to a release would release that package on every run. An entry with no `message` uses semantic-release's default, which has no trailer either, so it is refused too.
+ */
+export function assertReleaseCommitTrailers(plugins: readonly PublishPluginSpec[], packagePlugins: PackagePluginSpecs | undefined): void {
+  const lists: readonly (readonly [string, readonly PublishPluginSpec[]])[] = [['plugins', plugins], ...Object.entries(packagePlugins ?? {}).map(([name, list]) => [`packagePlugins for "${name}"`, list] as const)];
+  for (const [where, list] of lists) {
+    for (const spec of list) {
+      const [name, config] = parsePublishPluginSpec(spec);
+      if (name === '@semantic-release/git' && !(typeof config.message === 'string' && isReleaseCommitMessage(config.message))) {
+        throw new ReleaseConfigurationError(
+          `${where}: the "@semantic-release/git" release commit message must end with the line "${RELEASE_COMMIT_TRAILER}" while packageSources is set, so the orchestrator recognises its own release commits and does not count them as changes to a package whose sources cover the released package. Add it as the final paragraph of "message".`,
+        );
+      }
+    }
+  }
+}
+
 /** The publish plugin that puts a release on a registry. */
 export const REGISTRY_PUBLISH_PLUGIN = '@semantic-release/npm';
 

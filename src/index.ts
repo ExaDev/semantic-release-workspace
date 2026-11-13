@@ -11,6 +11,7 @@ export { buildDependencyGraph, orderedPackages, topologicalOrder, type Dependenc
 export { classifyDependencyRange, updateDependencyRange, type DependencyRangeShape, type DependencyRangeUpdate } from './version-range';
 export { readManifest, writeDependencyRange, type DependencyField, type PackageManifest } from './manifest';
 export { resolveBundledDependencies, type BundledDependencies } from './bundling';
+export { RELEASE_COMMIT_TRAILER } from './release-commit';
 export { loadPackageSources, resolvePackageSources, type PackageSourcePatterns } from './package-sources';
 
 export {
