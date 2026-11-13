@@ -52,21 +52,25 @@ describe('packageSources against the orchestrator\'s own commits', () => {
 
 describe('packageSources against release commits', () => {
   /** Independent packages, so the only commits a package can see from its sibling are the sibling's feature and its release commit. `a` runs first, so `b`'s release commit lands after `a`'s tag. */
+  // `b` is scaffolded first so `a`'s first tag follows `b`'s scaffold commit, which also writes `packages/b/package.json`.
   const independent: readonly FixturePackage[] = [
-    { name: '@fixture/a', version: '1.0.0', private: false },
     { name: '@fixture/b', version: '1.0.0', private: false },
+    { name: '@fixture/a', version: '1.0.0', private: false },
   ];
 
   /** A project that maps `chore` to a patch release, as the consumer of this option does. */
   const choreIsPatch = { releaseRules: [{ type: 'chore', release: 'patch' }] };
 
+  /**
+   * `a` lists only `packages/b/package.json`, which `b`'s feature commit does not touch and `b`'s release commit does (it writes the version). So the first run releases `b` alone, and `a`'s range in the second run still contains that release commit, because `a` was not part of the release that tagged it. With `chore` mapped to a patch release, `a` releases then unless the release commit is recognised as the orchestrator's own.
+   */
   async function secondRunAfterSiblingRelease(commitStrategy: 'per-package' | 'single'): Promise<readonly string[]> {
     const fixture = await createWorkspaceFixture(independent, [{ message: 'feat(b): add a feature', files: { 'packages/b/src/index.js': 'export const feature = 1;\n' } }]);
     try {
       const plugins = commitStrategy === 'single' ? [NPM_ONLY] : PLUGINS;
-      const options = { root: fixture.root, env: releaseEnv(), plugins, commitStrategy, analyzeCommits: choreIsPatch, packageSources: { '@fixture/a': ['packages/b'] } };
+      const options = { root: fixture.root, env: releaseEnv(), plugins, commitStrategy, analyzeCommits: choreIsPatch, packageSources: { '@fixture/a': ['packages/b/package.json'] } };
       const first = await releaseWorkspace(options);
-      expect(first.packages.filter((pkg) => pkg.released).map((pkg) => pkg.name)).toEqual(['@fixture/a', '@fixture/b']);
+      expect(first.packages.filter((pkg) => pkg.released).map((pkg) => pkg.name)).toEqual(['@fixture/b']);
       const second = await releaseWorkspace(options);
       return second.packages.filter((pkg) => pkg.released).map((pkg) => pkg.name);
     } finally {
