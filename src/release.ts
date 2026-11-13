@@ -2,7 +2,7 @@ import { resolve } from 'node:path';
 import semanticRelease from 'semantic-release';
 import type { BranchSpec, Options, ReleaseType, Result } from 'semantic-release';
 import { type BundledDependencies, resolveBundledDependencies } from './bundling';
-import { resolvePackageSources } from './package-sources';
+import { loadPackageSources } from './package-sources';
 import { formatDependencyBumpMessage } from './dependency-bump-commit';
 import { releasePackageAcrossBranchMoves, type BranchTracker } from './branch-integration';
 import { ReleaseConfigurationError, WorkspaceReleaseError, WorkspaceStateError } from './errors';
@@ -187,7 +187,7 @@ async function recoverUnpublishedWorkspaceReleases(options: ReleaseWorkspaceOpti
     return recover(options.recoveryPublisher);
   }
 
-  const sources = resolvePackageSources(graph, options.packageSources);
+  const sources = await loadPackageSources(graph, options.packageSources, { cwd: workspace.root });
   const publisher = createTaggedCommitPublisher({
     repoRoot,
     env,
@@ -233,7 +233,7 @@ async function releaseWorkspacePerPackage(options: ReleaseWorkspaceOptions): Pro
     { requireGitPlugin: !dryRun },
   );
   const bundled = resolveBundledDependencies(graph, options.bundlingPackages);
-  const sources = resolvePackageSources(graph, options.packageSources);
+  const sources = await loadPackageSources(graph, options.packageSources, { cwd: workspace.root });
   const analyzeCommitsConfig = options.analyzeCommits ?? {};
   const generateNotesConfig = options.generateNotes ?? {};
 

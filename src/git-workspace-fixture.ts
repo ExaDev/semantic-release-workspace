@@ -27,6 +27,8 @@ export interface FixtureCommit {
   readonly message: string;
   /** Files to write before committing, keyed by POSIX path relative to the workspace root. */
   readonly files?: Readonly<Record<string, string>>;
+  /** Tracked files to delete in this commit, as POSIX paths relative to the workspace root. */
+  readonly remove?: readonly string[];
   /** A `name@version` tag to place on the resulting commit, as a previous release of that package. */
   readonly tag?: string;
 }
@@ -107,6 +109,9 @@ export async function createWorkspaceFixture(
       const absolute = join(root, path);
       await mkdir(dirname(absolute), { recursive: true });
       await writeFile(absolute, content);
+    }
+    if (fixtureCommit.remove !== undefined && fixtureCommit.remove.length > 0) {
+      await git(['rm', '-q', '--', ...fixtureCommit.remove], { cwd: root });
     }
     await commit(root, fixtureCommit.message, Object.keys(fixtureCommit.files ?? {}));
     if (fixtureCommit.tag !== undefined) {

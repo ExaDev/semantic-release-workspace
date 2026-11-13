@@ -27,23 +27,26 @@ const GIT_REPOSITORY_DISCOVERY_ENV_KEYS: readonly string[] = [
 ];
 
 /**
- * A copy of the given environment with every repository-discovery-affecting `GIT_*` key removed -- see `GIT_REPOSITORY_DISCOVERY_ENV_KEYS`.
+ * The environment variables that change how every pathspec git is given is interpreted. `commitsTouching` states the magic it needs (`top`, `glob`) in each pathspec, and `GIT_LITERAL_PATHSPECS` would make git read that magic as part of a file name, matching nothing, so a caller's environment must not reach it. `GIT_GLOB_PATHSPECS`, `GIT_NOGLOB_PATHSPECS` and `GIT_ICASE_PATHSPECS` change glob and case handling the same way, so all four are removed together with the repository-discovery variables.
+ */
+const GIT_PATHSPEC_ENV_KEYS: readonly string[] = ['GIT_LITERAL_PATHSPECS', 'GIT_GLOB_PATHSPECS', 'GIT_NOGLOB_PATHSPECS', 'GIT_ICASE_PATHSPECS'];
+
+/**
+ * A copy of the given environment with every repository-discovery-affecting and pathspec-affecting `GIT_*` key removed: see `GIT_REPOSITORY_DISCOVERY_ENV_KEYS` and `GIT_PATHSPEC_ENV_KEYS`. Read from `process.env` on each call, not once at load, so an environment changed after this module loaded is sanitised too.
  *
  * Exported (not just used internally by `git()`) because this package hands an environment to two different kinds of subprocess: its own `git()` calls (sanitized unconditionally below, from `process.env`, since those never take a caller-supplied environment) and semantic-release's own programmatic API, which spawns its *own* internal git subprocesses (tag, push, verifyAuth) using whatever `env` this package passes it -- release.ts and single-commit-release.ts both call this on the environment they construct for that, so a `GIT_DIR` inherited from an outer hook cannot leak into semantic-release's internal git calls either, not just into this package's own.
  */
 export function sanitizeGitEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const sanitized = { ...env };
-  for (const key of GIT_REPOSITORY_DISCOVERY_ENV_KEYS) {
+  for (const key of [...GIT_REPOSITORY_DISCOVERY_ENV_KEYS, ...GIT_PATHSPEC_ENV_KEYS]) {
     Reflect.deleteProperty(sanitized, key);
   }
   return sanitized;
 }
 
-const SANITIZED_PROCESS_GIT_ENV = sanitizeGitEnv(process.env);
-
 /** `git log --name-only` over everything since a package's last release tag can legitimately produce tens of megabytes of path output on a long-lived monorepo, well past execFile's default buffer, failing on exactly the big workspaces this tool exists for -- hence the generous 100 MiB default, rather than execFile's own. */
 async function execGit(args: readonly string[], cwd: string, maxBuffer = 104_857_600): Promise<string> {
-  const { stdout } = await execFile('git', args, { cwd, maxBuffer, env: SANITIZED_PROCESS_GIT_ENV });
+  const { stdout } = await execFile('git', args, { cwd, maxBuffer, env: sanitizeGitEnv(process.env) });
   return stdout;
 }
 
@@ -98,6 +101,16 @@ export async function commitsTouching(from: string | undefined, pathspecs: reado
   const range = from === undefined ? 'HEAD' : `${from}..HEAD`;
   const output = await git(['log', '--full-history', '--no-merges', '--format=%H', range, '--', ...pathspecs], options);
   return new Set(output.split('\n').filter((line) => line !== ''));
+}
+
+/**
+ * Whether any of `pathspecs` has ever matched a path in the history reachable from HEAD: a file tracked at HEAD, or a path some commit touched, so a path whose every file was later deleted still counts. The tracked-file check comes first because it is quick; the history walk only runs for a path with no tracked file, which is either a path that was deleted (it ends at the commit that touched it) or a mistake (it walks the whole history).
+ */
+export async function pathspecsEverMatched(pathspecs: readonly string[], options: GitCommandOptions): Promise<boolean> {
+  if ((await git(['ls-files', '--', ...pathspecs], options)).trim() !== '') {
+    return true;
+  }
+  return (await git(['log', '-1', '--full-history', '--format=%H', 'HEAD', '--', ...pathspecs], options)).trim() !== '';
 }
 
 /** The branch a dependency-bump commit will be pushed to. Refuses a detached HEAD by name rather than pushing `HEAD:HEAD` to the remote and watching it fail somewhere less legible. A detached HEAD is a WorkspaceStateError rather than a GitCommandError because the git command itself succeeded: the repository's state is what cannot support the release, and conflating the two would report a working command as a failed one. */

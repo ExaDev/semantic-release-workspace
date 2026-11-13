@@ -148,4 +148,50 @@ describe('createTaggedCommitPublisher', () => {
       await fixture.remove();
     }
   }, TestTimeoutMs.Long);
+
+  it('regenerates the notes of a recovered release over the commits its package sources add', async () => {
+    const notesWith = async (sources: readonly string[]): Promise<string> => {
+      const fixture = await createWorkspaceFixture(
+        [RELEASED],
+        [
+          { message: 'fix(crate): correct the parser', files: { 'rust/crates/shared/src/lib.rs': 'x\n' } },
+          {
+            message: 'chore(release): @fixture/a@1.0.1 [skip ci]',
+            files: { 'packages/a/package.json': `${JSON.stringify({ name: '@fixture/a', version: '1.0.1', private: false, type: 'module' }, null, 2)}\n` },
+            tag: '@fixture/a@1.0.1',
+          },
+        ],
+        { pnpmLockfile: true },
+      );
+      const pluginDirectory = await mkdtemp(join(tmpdir(), 'semantic-release-workspace-step-recorder-'));
+      try {
+        const recorder = await writeStepRecorder(pluginDirectory);
+        const workspace = await discoverWorkspace(fixture.root);
+        const pkg = mustGet(new Map(workspace.packages.map((entry) => [entry.name, entry])), '@fixture/a', 'package');
+        const publisher = createTaggedCommitPublisher({
+          repoRoot: fixture.root,
+          env: releaseEnv(),
+          log: () => undefined,
+          tagFormat: DEFAULT_TAG_FORMAT,
+          branches: undefined,
+          plugins: new Map([['@fixture/a', [[recorder.modulePath, { label: 'registry' }]]]]),
+          registryStep: () => 0,
+          generateNotesConfig: {},
+          sources: new Map([['@fixture/a', sources]]),
+        });
+        try {
+          await publisher.publish({ pkg, release: { name: '@fixture/a', version: '1.0.1', gitTag: '@fixture/a@1.0.1' } });
+          return (await recorder.calls())[0]?.notes ?? '';
+        } finally {
+          await publisher.close();
+        }
+      } finally {
+        await rm(pluginDirectory, { recursive: true, force: true });
+        await fixture.remove();
+      }
+    };
+
+    expect(await notesWith(['rust/crates/shared'])).toContain('correct the parser');
+    expect(await notesWith([])).not.toContain('correct the parser');
+  }, TestTimeoutMs.Long);
 });

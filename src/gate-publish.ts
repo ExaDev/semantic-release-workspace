@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import type { BranchSpec, Options, ReleaseType } from 'semantic-release';
 import { detachRelease, resumeRelease, type ReleaseGateState } from '@exadev/release-gate';
 import { type BundledDependencies, resolveBundledDependencies } from './bundling';
-import { resolvePackageSources } from './package-sources';
+import { loadPackageSources } from './package-sources';
 import { WorkspaceReleaseError } from './errors';
 import { sanitizeGitEnv } from './git';
 import { buildDependencyGraph, mustGet, orderedPackages, topologicalOrder, validateDependencyRanges } from './graph';
@@ -54,7 +54,7 @@ export async function detachWorkspaceRelease(options: ReleaseWorkspaceOptions): 
     { requireGitPlugin: !dryRun },
   );
   const bundled = resolveBundledDependencies(graph, options.bundlingPackages);
-  const sources = resolvePackageSources(graph, options.packageSources);
+  const sources = await loadPackageSources(graph, options.packageSources, { cwd: workspace.root });
   const analyzeCommitsConfig = options.analyzeCommits ?? {};
   const generateNotesConfig = options.generateNotes ?? {};
 
