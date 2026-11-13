@@ -1,4 +1,5 @@
 import type { ReleaseType } from 'semantic-release';
+import { finalParagraph } from './release-commit';
 import { isReleaseType } from './release-type';
 
 /**
@@ -48,6 +49,8 @@ export function parseDependencyBumpTrailer(message: string): DependencyBumpCommi
 
 function matchTrailerLine(message: string, key: string): string | undefined {
   const prefix = `${key}: `;
-  const line = message.split('\n').find((candidate) => candidate.startsWith(prefix));
+  const line = finalParagraph(message)
+    .split('\n')
+    .find((candidate) => candidate.startsWith(prefix));
   return line === undefined ? undefined : line.slice(prefix.length).trim();
 }

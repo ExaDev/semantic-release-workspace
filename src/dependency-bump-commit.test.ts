@@ -44,4 +44,10 @@ describe('formatDependencyBumpMessage / parseDependencyBumpTrailer', () => {
     const partial = ['chore(deps): bump @fixture/a to ^1.1.0 in @fixture/b [skip ci]', '', 'Bumped-Workspace-Dependency: @fixture/a'].join('\n');
     expect(parseDependencyBumpTrailer(partial)).toBeUndefined();
   });
+
+  it('ignores trailer lines quoted in the middle of a message, outside its final paragraph', () => {
+    const bump = formatDependencyBumpMessage({ dependency: '@fixture/a', version: '1.1.0', range: '^1.1.0', releaseType: 'minor', dependent: '@fixture/b' });
+    const quoted = ['feat(b): quote a bump message in the body', '', ...bump.split('\n'), '', 'Closes the discussion.'].join('\n');
+    expect(parseDependencyBumpTrailer(quoted)).toBeUndefined();
+  });
 });
