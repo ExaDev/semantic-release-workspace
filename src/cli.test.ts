@@ -216,6 +216,17 @@ describe('readReleaseConfigFile', () => {
     await expect(readReleaseConfigFile(path)).rejects.toThrow(/"bundlingPackages" must be an array of package name strings/);
   });
 
+  it('reads packageSources', async () => {
+    const path = await temporaryConfigFile('release.config.json', JSON.stringify({ packageSources: { trilean: ['rust/crates/trilean'] } }));
+    expect((await readReleaseConfigFile(path)).packageSources).toEqual({ trilean: ['rust/crates/trilean'] });
+  });
+
+  it('rejects packageSources that does not map package names to arrays of strings', async () => {
+    const path = await temporaryConfigFile('release.config.json', JSON.stringify({ packageSources: { trilean: 'rust/crates/trilean' } }));
+    await expect(readReleaseConfigFile(path)).rejects.toThrow(InvalidArgumentError);
+    await expect(readReleaseConfigFile(path)).rejects.toThrow(/"packageSources" must be an object mapping package names to arrays/);
+  });
+
   it('rejects a tagFormat with a placeholder other than name and version', async () => {
     const path = await temporaryConfigFile('release.config.json', JSON.stringify({ tagFormat: '${package}-v${version}' }));
     await expect(readReleaseConfigFile(path)).rejects.toThrow(InvalidArgumentError);
