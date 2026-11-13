@@ -1,3 +1,34 @@
+## [3.4.0](https://github.com/ExaDev/semantic-release-workspace/compare/v3.3.4...v3.4.0) (2026-11-13)
+
+### Features
+
+* release a package when files outside its directory change ([74f3cc4](https://github.com/ExaDev/semantic-release-workspace/commit/74f3cc4b9bb4d5a02c48d50e8dcea65f83e42bb8))
+
+### Bug Fixes
+
+* derive package sources per stage so a retry that sees a new package still works ([2308880](https://github.com/ExaDev/semantic-release-workspace/commit/2308880375cb950ec308bb219448ba33015593c7))
+* keep the sources option of createTaggedCommitPublisher optional ([58bfb26](https://github.com/ExaDev/semantic-release-workspace/commit/58bfb261abb73acff84c14a451c343d31d8425cf))
+* match packageSources paths whatever the environment, refuse ones matching nothing ([c023829](https://github.com/ExaDev/semantic-release-workspace/commit/c023829ce23edb0923014d0cfcb7040232d28f19))
+* never count release commits through packageSources ([b3db004](https://github.com/ExaDev/semantic-release-workspace/commit/b3db0042d45a6414acd7a2b85fb60e81cd53a758))
+* never count the orchestrator's dependency-bump commits through packageSources ([451efee](https://github.com/ExaDev/semantic-release-workspace/commit/451efeeae44a4c781d50259926a7e94767fe8b1b))
+* read the orchestrator's trailers from the final paragraph and require the release trailer ([5b235ea](https://github.com/ExaDev/semantic-release-workspace/commit/5b235ea5a09b848422085e0ab69ce1200da1d6ad))
+* refuse a packageSources pattern made only of wildcard segments ([f19574f](https://github.com/ExaDev/semantic-release-workspace/commit/f19574ffaf98cc5f68b9df355f034d1fa0042318))
+* state the wildcard-only rule the validation applies ([64dc96a](https://github.com/ExaDev/semantic-release-workspace/commit/64dc96adcb06902dfb9735fb69e94fc08699e796))
+* validate packageSources once before recovery, and warn about a path no longer tracked ([d16984d](https://github.com/ExaDev/semantic-release-workspace/commit/d16984d6152ca1cb87da753c17e17e147aa6d336))
+
+### Documentation
+
+* correct what a bump commit writes and state which trailers are reserved ([7de5071](https://github.com/ExaDev/semantic-release-workspace/commit/7de5071a2e59f326b20eca25abb617232acca4f9))
+* document packageSources for packages built from outside sources ([638693f](https://github.com/ExaDev/semantic-release-workspace/commit/638693f1279be09b9fc34efecf81072c76a3f65c))
+* name the exact release trailer line and drop spaced double hyphens from touched lines ([03172cc](https://github.com/ExaDev/semantic-release-workspace/commit/03172ccd09eec2ec40033605d9a72c9178b0e069))
+* state what packageSources and the bump commits write and reject ([b7b82a3](https://github.com/ExaDev/semantic-release-workspace/commit/b7b82a317a6508a89b8d254d468266d01980cb30))
+
+### Tests
+
+* make the case-insensitive pathspec test able to fail and drop a type assertion ([cac2bce](https://github.com/ExaDev/semantic-release-workspace/commit/cac2bce51b00e99928dbc519c19b82641897b380))
+* make the release-commit tests able to fail under both commit strategies ([77e7f3f](https://github.com/ExaDev/semantic-release-workspace/commit/77e7f3fd8f670f35e1503dc5d59317945a1dfaf7))
+* pin that a run without packageSources makes no extra git calls ([0297102](https://github.com/ExaDev/semantic-release-workspace/commit/0297102fe256b01fb32c9794bfbf81340b15cef1))
+
 ## [3.3.4](https://github.com/ExaDev/semantic-release-workspace/compare/v3.3.3...v3.3.4) (2026-11-11)
 
 ### Build System
