@@ -108,7 +108,6 @@ describe('createTaggedCommitPublisher', () => {
         ]),
         registryStep: () => 1,
         generateNotesConfig: {},
-        sources: new Map([['@fixture/a', []]]),
       });
 
       let checkout: string | undefined;
