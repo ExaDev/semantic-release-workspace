@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import type { BranchSpec, Options, ReleaseType } from 'semantic-release';
 import { detachRelease, resumeRelease, type ReleaseGateState } from '@exadev/release-gate';
 import { type BundledDependencies, resolveBundledDependencies } from './bundling';
+import { resolvePackageSources } from './package-sources';
 import { WorkspaceReleaseError } from './errors';
 import { sanitizeGitEnv } from './git';
 import { buildDependencyGraph, mustGet, orderedPackages, topologicalOrder, validateDependencyRanges } from './graph';
@@ -53,6 +54,7 @@ export async function detachWorkspaceRelease(options: ReleaseWorkspaceOptions): 
     { requireGitPlugin: !dryRun },
   );
   const bundled = resolveBundledDependencies(graph, options.bundlingPackages);
+  const sources = resolvePackageSources(graph, options.packageSources);
   const analyzeCommitsConfig = options.analyzeCommits ?? {};
   const generateNotesConfig = options.generateNotes ?? {};
 
@@ -63,6 +65,7 @@ export async function detachWorkspaceRelease(options: ReleaseWorkspaceOptions): 
       generateNotesConfig,
       bumpsForThisPackage,
       bundled: mustGet(bundled, pkg.name, 'bundled dependencies'),
+      sources: mustGet(sources, pkg.name, 'package sources'),
       tagFormat: validateTagFormat(options.tagFormat ?? DEFAULT_TAG_FORMAT),
       dryRun,
       env,
@@ -103,6 +106,7 @@ async function runPackageDetach(
     readonly generateNotesConfig: Record<string, unknown>;
     readonly bumpsForThisPackage: readonly AppliedDependencyBump[];
     readonly bundled: BundledDependencies;
+    readonly sources: readonly string[];
     readonly tagFormat: string;
     readonly dryRun: boolean;
     readonly env: NodeJS.ProcessEnv | undefined;
@@ -115,6 +119,7 @@ async function runPackageDetach(
     generateNotesConfig: options.generateNotesConfig,
     bumps: { bumpsFor: () => options.bumpsForThisPackage },
     bundled: options.bundled,
+    sources: options.sources,
   });
 
   const cliOptions: Options = {

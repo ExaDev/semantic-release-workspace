@@ -18,6 +18,7 @@ import {
   workingTreeChanges,
 } from './git';
 import { type BundledDependencies, resolveBundledDependencies } from './bundling';
+import { resolvePackageSources } from './package-sources';
 import { buildDependencyGraph, mustGet, orderedPackages, topologicalOrder, validateDependencyRanges, type DependencyGraph } from './graph';
 import { writeDependencyRange } from './manifest';
 import { packageName } from './package-name';
@@ -110,6 +111,7 @@ async function attemptSingleCommitRelease(options: ReleaseWorkspaceOptions): Pro
     { requireGitPlugin: false, forbidGitPlugin: true },
   );
   const bundled = resolveBundledDependencies(graph, options.bundlingPackages);
+  const sources = resolvePackageSources(graph, options.packageSources);
   const analyzeCommitsConfig = options.analyzeCommits ?? {};
   const generateNotesConfig = options.generateNotes ?? {};
   const tagFormat = validateTagFormat(options.tagFormat ?? DEFAULT_TAG_FORMAT);
@@ -133,6 +135,7 @@ async function attemptSingleCommitRelease(options: ReleaseWorkspaceOptions): Pro
       generateNotesConfig,
       bumpsForThisPackage,
       bundled: mustGet(bundled, name, 'bundled dependencies'),
+      sources: mustGet(sources, name, 'package sources'),
       env,
       branches: options.branches,
       onCommitsResolved: (commits) => {
@@ -314,6 +317,7 @@ async function analysePackage(pkg: WorkspacePackage, options: {
   readonly generateNotesConfig: Record<string, unknown>;
   readonly bumpsForThisPackage: readonly AppliedDependencyBump[];
   readonly bundled: BundledDependencies;
+  readonly sources: readonly string[];
   readonly env: NodeJS.ProcessEnv | undefined;
   readonly branches: readonly BranchSpec[] | undefined;
   readonly onCommitsResolved: (commits: readonly Commit[]) => void;
@@ -325,6 +329,7 @@ async function analysePackage(pkg: WorkspacePackage, options: {
     generateNotesConfig: options.generateNotesConfig,
     bumps: { bumpsFor: () => options.bumpsForThisPackage },
     bundled: options.bundled,
+    sources: options.sources,
     onCommitsResolved: options.onCommitsResolved,
   });
 

@@ -7,7 +7,8 @@ import { type BundledDependencies } from './bundling';
 import { packageName } from './package-name';
 import { parseDependencyBumpTrailer } from './dependency-bump-commit';
 import { ReleaseConfigurationError } from './errors';
-import { changedPathsSince } from './git';
+import { changedPathsSince, commitsTouching } from './git';
+import { toPathspecs } from './package-sources';
 import { highestReleaseType, isReleaseType, raiseReleaseType } from './release-type';
 import type { WorkspacePackage } from './workspace';
 
@@ -83,7 +84,7 @@ export interface ScopedPlugins {
 /**
  * Builds the per-package `analyzeCommits` and `generateNotes` functions handed to semantic-release as inline plugins.
  *
- * Both apply the same path scoping before delegating to the real `@semantic-release/commit-analyzer` and `@semantic-release/release-notes-generator`: the commit list semantic-release already fetched for the release range is filtered down to commits whose `git log --name-only` file list intersects the package's own directory, and only the filtered list reaches the standard plugin. Conventional-commit parsing and changelog formatting stay entirely inside the standard plugins.
+ * Both apply the same path scoping before delegating to the real `@semantic-release/commit-analyzer` and `@semantic-release/release-notes-generator`: the commit list semantic-release already fetched for the release range is filtered down to commits whose `git log --name-only` file list intersects the package's own directory or that git reports as touching one of the package's extra `sources`, and only the filtered list reaches the standard plugin. Conventional-commit parsing and changelog formatting stay entirely inside the standard plugins.
  *
  * The `analyzeCommits` wrapper carries two additions beyond filtering. When the standard analyzer finds no releasable commits but a workspace dependency range of the package's has changed, it returns 'patch' anyway: a dependent whose only change is a dependency bump still needs a release for that range to reach the registry. And when a bumped dependency is one the package bundles (`scope.bundled.releaseTypeFrom`), the package's release type is raised to at least that dependency's shipped release type, whether or not the package has releasable commits of its own, because the dependency's change reaches consumers only inside this package. "Has changed" is read from two sources, merged: bumps recorded in memory earlier in the current run (`scope.bumps`), and bumps recorded in the package's own filtered commit history via the trailer `dependency-bump-commit.ts` writes and reads -- the latter is what lets a run that starts after a previous run already committed and pushed the bump (a crash recovery, or simply a later run) reach the same decision, rather than depending on state that existed only inside the process that made the commit.
  */
@@ -94,24 +95,33 @@ export function createScopedPlugins(scope: {
   readonly bumps: DependencyBumpSource;
   /** Which of the package's workspace dependencies it bundles; see `resolveBundledDependencies`. Omitted for a package that bundles none, which keeps the forced patch for every dependency bump. */
   readonly bundled?: BundledDependencies;
+  /** Repository-relative paths or globs, beyond the package's own directory, whose commits count towards its release (`ReleaseWorkspaceOptions.packageSources`, resolved by `resolvePackageSources`). Omitted or empty scopes the package to its own directory alone. */
+  readonly sources?: readonly string[];
   /** Called with the path-filtered commit list every time this package's commits are resolved (from either step, whichever runs first). Optional: `commitStrategy: 'single'` uses it to capture the same filtered list `success()`'s GitHub plugin step needs later, without recomputing `changedPathsSince`/`filterCommitsToDirectory` itself from the outside. */
   readonly onCommitsResolved?: (commits: readonly Commit[]) => void;
 }): ScopedPlugins {
   // One `git log --name-only` pass per release range, shared between the analyzeCommits and generateNotes steps (semantic-release calls both with the same lastRelease base; notes regeneration after a prepare-plugin commit reuses the cached range because the analysis list itself does not change).
-  let cached: { readonly from: string | undefined; readonly paths: Promise<Map<string, ReadonlySet<string>>> } | undefined;
+  let cached: { readonly from: string | undefined; readonly scan: Promise<readonly [Map<string, ReadonlySet<string>>, ReadonlySet<string>]> } | undefined;
   // The highest release type among the carried bumps the most recent analysis saw, read back by `shippedReleaseType` once semantic-release has decided the package's own type.
   let carriedReleaseType: ReleaseType | undefined;
+
+  /** The commits in the release range that changed one of the package's extra source paths; empty without running git when it has none. */
+  async function commitsOnSources(from: string | undefined, cwd: string): Promise<ReadonlySet<string>> {
+    const sources = scope.sources ?? [];
+    return sources.length === 0 ? new Set() : commitsTouching(from, toPathspecs(sources), { cwd });
+  }
 
   async function commitsForPackage(context: Pick<AnalyzeCommitsContext, 'commits'> & { readonly lastRelease: unknown; readonly cwd: string }): Promise<readonly Commit[]> {
     // A lastRelease with no gitHead means semantic-release fetched the package's whole history, so the path map is built over the same unbounded range.
     const from = hasGitHead(context.lastRelease) ? context.lastRelease.gitHead : undefined;
-    // Two branches, not `cached === undefined || cached.from !== from`: when this is the very first call for a package with no prior release, both `cached` and `from` are `undefined`, and a single optional-chained comparison cannot distinguish "nothing cached yet" from "cached, and it happens to match".
-    if (cached === undefined) {
-      cached = { from, paths: changedPathsSince(from, { cwd: context.cwd }) };
-    } else if (cached.from !== from) {
-      cached = { from, paths: changedPathsSince(from, { cwd: context.cwd }) };
+    if (cached === undefined || cached.from !== from) {
+      // One promise for both git passes, so a failure of either is awaited, not left unhandled behind the other.
+      cached = { from, scan: Promise.all([changedPathsSince(from, { cwd: context.cwd }), commitsOnSources(from, context.cwd)]) };
     }
-    const commits = filterCommitsToDirectory(context.commits, await cached.paths, scope.pkg.repoRelativeDirectory);
+    const [paths, onSources] = await cached.scan;
+    const inDirectory = new Set(filterCommitsToDirectory(context.commits, paths, scope.pkg.repoRelativeDirectory).map((commit) => commit.hash));
+    // Filtering the semantic-release list again, not concatenating, keeps the commits in the order semantic-release supplied them.
+    const commits = context.commits.filter((commit) => inDirectory.has(commit.hash) || onSources.has(commit.hash));
     scope.onCommitsResolved?.(commits);
     return commits;
   }

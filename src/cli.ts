@@ -9,6 +9,7 @@ import { ReleaseConfigurationError, WorkspaceReleaseError } from './errors';
 import { isDetachedPackageReleaseArray, resumeWorkspaceRelease } from './gate-publish';
 import { isJsonObject, isStringArray, isUnknownArray } from './json';
 import { packageName } from './package-name';
+import { isPackageSources } from './package-sources';
 import { type PackagePluginSpecs, type PublishPluginSpec } from './plugins';
 import { releaseWorkspace, type CommitStrategy, type PackageReleaseOutcome } from './release';
 import { validateTagFormat } from './tag-format';
@@ -24,6 +25,7 @@ const CONFIG_OPTION_KEYS: ReadonlySet<string> = new Set([
   'gatePublish',
   'tagFormat',
   'bundlingPackages',
+  'packageSources',
 ]);
 const COMMIT_STRATEGIES: ReadonlySet<string> = new Set<CommitStrategy>(['per-package', 'single']);
 
@@ -95,7 +97,7 @@ export function createProgram(): Command {
   release.option('--published-tags-file <path>', PUBLISHED_TAGS_FILE_HELP);
   release.option(
     '--config <file>',
-    'config file (.json, .yaml, .yml, .js, .cjs, or .ts) providing any of the release options (dryRun, branches, plugins, packagePlugins, analyzeCommits, generateNotes, commitStrategy, tagFormat, gatePublish, bundlingPackages); explicit flags win',
+    'config file (.json, .yaml, .yml, .js, .cjs, or .ts) providing any of the release options (dryRun, branches, plugins, packagePlugins, analyzeCommits, generateNotes, commitStrategy, tagFormat, gatePublish, bundlingPackages, packageSources); explicit flags win',
   );
   release.action(runRelease);
 
@@ -161,6 +163,7 @@ const NO_CONFIG_FILE: ReleaseConfigFile = {
   tagFormat: undefined,
   gatePublish: undefined,
   bundlingPackages: undefined,
+  packageSources: undefined,
 };
 
 async function runRelease(flags: ReleaseFlags): Promise<void> {
@@ -185,6 +188,8 @@ async function runRelease(flags: ReleaseFlags): Promise<void> {
     tagFormat: flags.tagFormat ?? file.tagFormat,
     gatePublish,
     bundlingPackages: flags.bundlingPackage.length > 0 ? flags.bundlingPackage : file.bundlingPackages,
+    // Config file only, like `packagePlugins`: a mapping from package names has no natural shape as a repeatable flag.
+    packageSources: file.packageSources,
     onPublished: await publishedTagsRecorder(flags.publishedTagsFile),
   });
 
@@ -279,6 +284,7 @@ export interface ReleaseConfigFile {
   readonly tagFormat: string | undefined;
   readonly gatePublish: boolean | undefined;
   readonly bundlingPackages: readonly string[] | undefined;
+  readonly packageSources: Readonly<Record<string, readonly string[]>> | undefined;
 }
 
 // The asynchronous explorer, not `cosmiconfigSync`: the synchronous one loads `.js` and `.ts` files through `require()`, which for a module using `export default` returns the whole module namespace (`default`, `__esModule`, and every named export) rather than the default export, so a config file exporting anything besides its default would be rejected as having unknown options. The asynchronous one imports the file and hands back its default export.
@@ -308,7 +314,7 @@ export async function readReleaseConfigFile(path: string): Promise<ReleaseConfig
     }
   }
 
-  const { dryRun, branches, plugins, packagePlugins, analyzeCommits, generateNotes, commitStrategy, tagFormat, gatePublish, bundlingPackages } = parsed;
+  const { dryRun, branches, plugins, packagePlugins, analyzeCommits, generateNotes, commitStrategy, tagFormat, gatePublish, bundlingPackages, packageSources } = parsed;
   if (dryRun !== undefined && typeof dryRun !== 'boolean') {
     throw new InvalidArgumentError(`--config file ${path}: "dryRun" must be a boolean`);
   }
@@ -340,6 +346,10 @@ export async function readReleaseConfigFile(path: string): Promise<ReleaseConfig
     throw new InvalidArgumentError(`--config file ${path}: "bundlingPackages" must be an array of package name strings`);
   }
 
+  if (packageSources !== undefined && !isPackageSources(packageSources)) {
+    throw new InvalidArgumentError(`--config file ${path}: "packageSources" must be an object mapping package names to arrays of repository path strings`);
+  }
+
   return {
     dryRun,
     branches,
@@ -351,6 +361,7 @@ export async function readReleaseConfigFile(path: string): Promise<ReleaseConfig
     tagFormat: tagFormat === undefined ? undefined : validateTagFormatOption(tagFormat, (message) => `--config file ${path}: ${message}`),
     gatePublish,
     bundlingPackages,
+    packageSources,
   };
 }
 

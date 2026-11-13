@@ -89,6 +89,17 @@ export function parseChangedPaths(output: string): Map<string, ReadonlySet<strin
   return changedPaths;
 }
 
+/**
+ * The hashes of the commits in `from..HEAD` (or the whole history when `from` is undefined) that changed a path matching any of `pathspecs`, asked of git itself so a path a commit deleted still matches, which a filesystem glob over the current tree cannot do.
+ *
+ * `--full-history` keeps git from pruning a side branch's commits while it simplifies history for the pathspec, and `--no-merges` leaves merge commits out as `changedPathsSince` does, since their changes arrive through their parents.
+ */
+export async function commitsTouching(from: string | undefined, pathspecs: readonly string[], options: GitCommandOptions): Promise<ReadonlySet<string>> {
+  const range = from === undefined ? 'HEAD' : `${from}..HEAD`;
+  const output = await git(['log', '--full-history', '--no-merges', '--format=%H', range, '--', ...pathspecs], options);
+  return new Set(output.split('\n').filter((line) => line !== ''));
+}
+
 /** The branch a dependency-bump commit will be pushed to. Refuses a detached HEAD by name rather than pushing `HEAD:HEAD` to the remote and watching it fail somewhere less legible. A detached HEAD is a WorkspaceStateError rather than a GitCommandError because the git command itself succeeded: the repository's state is what cannot support the release, and conflating the two would report a working command as a failed one. */
 export async function currentBranch(options: GitCommandOptions): Promise<string> {
   const branch = (await git(['rev-parse', '--abbrev-ref', 'HEAD'], options)).trim();

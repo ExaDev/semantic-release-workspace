@@ -2,6 +2,7 @@ import { resolve } from 'node:path';
 import semanticRelease from 'semantic-release';
 import type { BranchSpec, Options, ReleaseType, Result } from 'semantic-release';
 import { type BundledDependencies, resolveBundledDependencies } from './bundling';
+import { resolvePackageSources } from './package-sources';
 import { formatDependencyBumpMessage } from './dependency-bump-commit';
 import { releasePackageAcrossBranchMoves, type BranchTracker } from './branch-integration';
 import { ReleaseConfigurationError, WorkspaceReleaseError, WorkspaceStateError } from './errors';
@@ -86,6 +87,12 @@ export interface ReleaseWorkspaceOptions {
    * Off unless named, because a workspace `devDependencies` entry is not bundled in general: a public package's test helper or lint config is a workspace devDependency whose changes never reach its consumers. A name that is not a package in the workspace, or is a private package, is rejected. Applies under every `commitStrategy` and to `gatePublish`. See `resolveBundledDependencies`.
    */
   readonly bundlingPackages?: readonly string[];
+  /**
+   * Extra repository paths whose commits count towards a package's release, keyed by package name, in addition to the package's own directory. Each entry is a path or a glob relative to the git repository's toplevel, and a commit counts when it changed that path, a file under it or a file matching it (`*` within a segment, `**` across segments, deleted files included). Use it for a package whose published files are built from sources outside its directory, for example a wasm build of a crate under `rust/crates/<name>`: without it a commit touching only those sources releases nothing. One path may be listed for several packages, and a commit touching it releases each of them.
+   *
+   * It only widens which commits count as a change to the package: commit analysis, release notes and the recovery of an unpublished release all read the same widened list, and the orchestrator still writes its own commits (dependency bumps, changelogs) only inside the package's directory. A name that is not a package in the workspace, and an absolute path, a path with a `..` segment or one naming the repository root, are rejected. Applies under every `commitStrategy` and to `gatePublish`. See `resolvePackageSources`.
+   */
+  readonly packageSources?: Readonly<Record<string, readonly string[]>>;
   /**
    * Where each publishing package's released versions are looked up before the run releases anything new, to find a release whose tag exists but whose version never reached the registry (see `recoverUnpublishedReleases`). Defaults to the npm CLI (`createNpmRegistryClient`). Not consulted under `gatePublish`, where a tag without a published version is the expected state until `resume` runs.
    */
@@ -180,6 +187,7 @@ async function recoverUnpublishedWorkspaceReleases(options: ReleaseWorkspaceOpti
     return recover(options.recoveryPublisher);
   }
 
+  const sources = resolvePackageSources(graph, options.packageSources);
   const publisher = createTaggedCommitPublisher({
     repoRoot,
     env,
@@ -195,6 +203,7 @@ async function recoverUnpublishedWorkspaceReleases(options: ReleaseWorkspaceOpti
       return step;
     },
     generateNotesConfig: options.generateNotes ?? {},
+    sources,
   });
   try {
     return await recover(publisher);
@@ -224,6 +233,7 @@ async function releaseWorkspacePerPackage(options: ReleaseWorkspaceOptions): Pro
     { requireGitPlugin: !dryRun },
   );
   const bundled = resolveBundledDependencies(graph, options.bundlingPackages);
+  const sources = resolvePackageSources(graph, options.packageSources);
   const analyzeCommitsConfig = options.analyzeCommits ?? {};
   const generateNotesConfig = options.generateNotes ?? {};
 
@@ -235,6 +245,7 @@ async function releaseWorkspacePerPackage(options: ReleaseWorkspaceOptions): Pro
       generateNotesConfig,
       bumpsForThisPackage,
       bundled: mustGet(bundled, pkg.name, 'bundled dependencies'),
+      sources: mustGet(sources, pkg.name, 'package sources'),
       dryRun,
       env,
       branches: options.branches,
@@ -335,6 +346,7 @@ async function runPackageRelease(pkg: WorkspacePackage, options: {
   readonly generateNotesConfig: Record<string, unknown>;
   readonly bumpsForThisPackage: readonly AppliedDependencyBump[];
   readonly bundled: BundledDependencies;
+  readonly sources: readonly string[];
   readonly dryRun: boolean;
   readonly env: NodeJS.ProcessEnv | undefined;
   readonly branches: readonly BranchSpec[] | undefined;
@@ -346,6 +358,7 @@ async function runPackageRelease(pkg: WorkspacePackage, options: {
     generateNotesConfig: options.generateNotesConfig,
     bumps: { bumpsFor: () => options.bumpsForThisPackage },
     bundled: options.bundled,
+    sources: options.sources,
   });
 
   const semanticReleaseOptions: Options = {
