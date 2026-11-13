@@ -8,11 +8,16 @@ import { discoverWorkspace } from './workspace';
 
 const seed: FixtureCommit = { message: 'chore: seed a crate', files: { 'rust/crates/shared/src/lib.rs': 'x\n' } };
 
-async function load(commits: readonly FixtureCommit[], sources: Readonly<Record<string, readonly string[]>>, workspaceSubdirectory?: string): Promise<ReadonlyMap<string, readonly string[]>> {
+async function load(
+  commits: readonly FixtureCommit[],
+  sources: Readonly<Record<string, readonly string[]>>,
+  workspaceSubdirectory?: string,
+  warn: (message: string) => void = () => undefined,
+): Promise<ReadonlyMap<string, readonly string[]>> {
   const fixture = await createWorkspaceFixture([{ name: '@fixture/a', version: '1.0.0' }], commits, workspaceSubdirectory === undefined ? {} : { workspaceSubdirectory });
   try {
     const workspace = await discoverWorkspace(fixture.root);
-    return await loadPackageSources(buildDependencyGraph(workspace.packages), sources, { cwd: workspace.root });
+    return await loadPackageSources(buildDependencyGraph(workspace.packages), sources, { cwd: workspace.root, warn });
   } finally {
     await fixture.remove();
   }
@@ -42,5 +47,23 @@ describe('loadPackageSources', () => {
     const outside: FixtureCommit = { message: 'chore: seed a crate', files: { '../rust/crates/shared/src/lib.rs': 'x\n' } };
     expect((await load([outside], { '@fixture/a': ['rust/crates/shared'] }, 'mono')).get('@fixture/a')).toEqual(['rust/crates/shared']);
     await expect(load([seed], { '@fixture/a': ['rust/crates/shared'] }, 'mono')).rejects.toThrow(/matches no file/);
+  }, TestTimeoutMs.Short);
+
+  it('warns, naming the package and the path, about a path with no tracked file that history shows once existed', async () => {
+    const renamed: FixtureCommit = { message: 'chore: remove the crate', remove: ['rust/crates/shared/src/lib.rs'] };
+    const warnings: string[] = [];
+    await load([seed, renamed], { '@fixture/a': ['rust/crates/shared'] }, undefined, (message) => {
+      warnings.push(message);
+    });
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toMatch(/@fixture\/a: "rust\/crates\/shared" matches no tracked file/);
+  }, TestTimeoutMs.Short);
+
+  it('does not warn about a path that still has a tracked file', async () => {
+    const warnings: string[] = [];
+    await load([seed], { '@fixture/a': ['rust/crates/shared'] }, undefined, (message) => {
+      warnings.push(message);
+    });
+    expect(warnings).toEqual([]);
   }, TestTimeoutMs.Short);
 });

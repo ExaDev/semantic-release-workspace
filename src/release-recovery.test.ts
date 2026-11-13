@@ -83,6 +83,26 @@ describe('releaseWorkspace recovering releases missing from the registry', () =>
     }
   }, TestTimeoutMs.Long);
 
+  it('rejects an invalid packageSources before it republishes anything', async () => {
+    const fixture = await createWorkspaceFixture([PUBLISHING], []);
+    try {
+      const publisher = recordingPublisher();
+      await expect(
+        releaseWorkspace({
+          root: fixture.root,
+          env: offlineEnv(),
+          plugins: PLUGINS['per-package'],
+          registry: registryWithout(['@fixture/a@1.0.0']),
+          recoveryPublisher: publisher,
+          packageSources: { '@fixture/a': ['../outside'] },
+        }),
+      ).rejects.toThrow(/packageSources is invalid/);
+      expect(publisher.published).toEqual([]);
+    } finally {
+      await fixture.remove();
+    }
+  }, TestTimeoutMs.Long);
+
   it('releases nothing new while a missing release cannot be republished', async () => {
     const fixture = await createWorkspaceFixture([PUBLISHING], [{ message: 'feat(a): something new', files: { 'packages/a/src/index.js': 'export const a = 2;\n' } }]);
     try {

@@ -2,7 +2,7 @@ import { resolve } from 'node:path';
 import semanticRelease from 'semantic-release';
 import type { BranchSpec, Options, ReleaseType, Result } from 'semantic-release';
 import { type BundledDependencies, resolveBundledDependencies } from './bundling';
-import { loadPackageSources } from './package-sources';
+import { loadPackageSources, type PackageSourcePatterns } from './package-sources';
 import { formatDependencyBumpMessage } from './dependency-bump-commit';
 import { releasePackageAcrossBranchMoves, type BranchTracker } from './branch-integration';
 import { ReleaseConfigurationError, WorkspaceReleaseError, WorkspaceStateError } from './errors';
@@ -90,7 +90,7 @@ export interface ReleaseWorkspaceOptions {
   /**
    * Extra repository paths whose commits count towards a package's release, keyed by package name, in addition to the package's own directory. Each entry is a path or a glob relative to the git repository's toplevel, and a commit counts when it changed that path, a file under it or a file matching it (`*` within a segment, `**` across segments, deleted files included). Use it for a package whose published files are built from sources outside its directory, for example a wasm build of a crate under `rust/crates/<name>`: without it a commit touching only those sources releases nothing. One path may be listed for several packages, and a commit touching it releases each of them.
    *
-   * It only widens which commits count as a change to the package: commit analysis, release notes and the notes regenerated for a recovered release all read the same widened list. A dependency-bump commit the orchestrator writes (recognised by its trailer, and rewriting the dependent's manifest and the root lockfile) never counts through this option, so a listed path may cover another package's directory or the lockfile without forcing releases. Rejected before anything releases: a name that is not a package in the workspace; an absolute path, a backslash, a path with a `..` segment or one naming the repository root; a pattern made only of wildcard segments, which would match every path; and a path or glob that has matched no file anywhere in the repository's history, which is almost always a typo. A path segment cannot contain a literal glob character (`*`, `?`, `[`). Applies under every `commitStrategy` and to `gatePublish`. See `loadPackageSources`.
+   * It only widens which commits count as a change to the package: commit analysis, release notes and the notes regenerated for a recovered release all read the same widened list. A dependency-bump commit the orchestrator writes (recognised by its trailer, and rewriting the dependent's manifest and the root lockfile) never counts through this option, so a listed path may cover another package's directory or the lockfile without forcing releases. Rejected before anything releases: a name that is not a package in the workspace; an absolute path, a backslash, a path with a `..` segment or one naming the repository root; a pattern made only of wildcard segments, which would match every path; and a path or glob that has matched no file anywhere in the repository's history, which is almost always a typo. A path with no tracked file but commits in history is accepted with a logged warning, in case it was renamed. A path segment cannot contain a literal glob character (`*`, `?`, `[`). Applies under every `commitStrategy` and to `gatePublish`. See `loadPackageSources`.
    */
   readonly packageSources?: Readonly<Record<string, readonly string[]>>;
   /**
@@ -142,25 +142,34 @@ export interface WorkspaceReleaseOutcome {
  * For each package, in topological order: run semantic-release's programmatic API with `cwd` scoped to the package directory, a `name@version` tag format to keep each package's tags distinct in the one shared tag namespace, and inline `analyzeCommits`/`generateNotes` plugins that filter the release range's commits down to the package's own directory before delegating to the standard plugins. When a package releases, every workspace package that depends on it and has not run yet gets its dependency range rewritten in its manifest and committed immediately -- before its own turn, so its commit analysis and its published manifest both see the new range.
  */
 export async function releaseWorkspace(options: ReleaseWorkspaceOptions = {}): Promise<WorkspaceReleaseOutcome> {
+  const commitStrategy = options.commitStrategy ?? 'per-package';
+  if (options.gatePublish === true && commitStrategy === 'single') {
+    throw new ReleaseConfigurationError(
+      'gatePublish is not supported together with commitStrategy: "single" -- single-commit-release.ts\'s tag/publish machinery is entirely bespoke and never goes through semantic-release\'s own run(), so it has no insertion point for release-gate\'s detach/resume primitives.',
+    );
+  }
+  // Loaded and validated once, before recovery or anything else with an outward effect, and handed to every stage below.
+  const sources = await loadSourcesOf(options);
   if (options.gatePublish === true) {
-    if ((options.commitStrategy ?? 'per-package') === 'single') {
-      throw new ReleaseConfigurationError(
-        'gatePublish is not supported together with commitStrategy: "single" -- single-commit-release.ts\'s tag/publish machinery is entirely bespoke and never goes through semantic-release\'s own run(), so it has no insertion point for release-gate\'s detach/resume primitives.',
-      );
-    }
-    return detachWorkspaceRelease(options);
+    return detachWorkspaceRelease(options, sources);
   }
 
-  const commitStrategy = options.commitStrategy ?? 'per-package';
-  const recovered = await recoverUnpublishedWorkspaceReleases(options, commitStrategy);
-  const outcome = commitStrategy === 'single' ? await releaseWorkspaceSingleCommit(options) : await releaseWorkspacePerPackage(options);
+  const recovered = await recoverUnpublishedWorkspaceReleases(options, commitStrategy, sources);
+  const outcome = commitStrategy === 'single' ? await releaseWorkspaceSingleCommit(options, sources) : await releaseWorkspacePerPackage(options, sources);
   return { ...outcome, recovered };
+}
+
+/** Validates `options.packageSources` against the workspace and the repository's history (see `loadPackageSources`), warning through `options.log` about a pattern that no longer names a tracked file. */
+async function loadSourcesOf(options: ReleaseWorkspaceOptions): Promise<PackageSourcePatterns> {
+  const workspace = await discoverWorkspace(resolve(options.root ?? process.cwd()));
+  const graph = buildDependencyGraph(workspace.packages);
+  return loadPackageSources(graph, options.packageSources, { cwd: workspace.root, warn: options.log ?? console.log });
 }
 
 /**
  * Publishes every release whose tag exists but whose version its registry does not hold, before the run releases anything new: see `recoverUnpublishedReleases`. Each package's publishing intent and publish plugins are the ones `commitStrategy` gives it for a new release, and a recovered release is reported through `onPublished` like a new one. A failure stops the run here, so nothing new is released on top of a release that is still missing.
  */
-async function recoverUnpublishedWorkspaceReleases(options: ReleaseWorkspaceOptions, commitStrategy: CommitStrategy): Promise<readonly TaggedRelease[]> {
+async function recoverUnpublishedWorkspaceReleases(options: ReleaseWorkspaceOptions, commitStrategy: CommitStrategy, sources: PackageSourcePatterns): Promise<readonly TaggedRelease[]> {
   const root = resolve(options.root ?? process.cwd());
   const log = options.log ?? console.log;
   const env = sanitizeGitEnv(options.env ?? process.env);
@@ -187,7 +196,6 @@ async function recoverUnpublishedWorkspaceReleases(options: ReleaseWorkspaceOpti
     return recover(options.recoveryPublisher);
   }
 
-  const sources = await loadPackageSources(graph, options.packageSources, { cwd: workspace.root });
   const publisher = createTaggedCommitPublisher({
     repoRoot,
     env,
@@ -213,7 +221,7 @@ async function recoverUnpublishedWorkspaceReleases(options: ReleaseWorkspaceOpti
 }
 
 /** `commitStrategy: 'per-package'`: see `releaseWorkspace`. */
-async function releaseWorkspacePerPackage(options: ReleaseWorkspaceOptions): Promise<WorkspaceReleaseOutcome> {
+async function releaseWorkspacePerPackage(options: ReleaseWorkspaceOptions, sources: PackageSourcePatterns): Promise<WorkspaceReleaseOutcome> {
   const root = resolve(options.root ?? process.cwd());
   const log = options.log ?? console.log;
   const dryRun = options.dryRun === true;
@@ -233,7 +241,6 @@ async function releaseWorkspacePerPackage(options: ReleaseWorkspaceOptions): Pro
     { requireGitPlugin: !dryRun },
   );
   const bundled = resolveBundledDependencies(graph, options.bundlingPackages);
-  const sources = await loadPackageSources(graph, options.packageSources, { cwd: workspace.root });
   const analyzeCommitsConfig = options.analyzeCommits ?? {};
   const generateNotesConfig = options.generateNotes ?? {};
 
