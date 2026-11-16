@@ -1,3 +1,9 @@
+## [3.4.1](https://github.com/ExaDev/semantic-release-workspace/compare/v3.4.0...v3.4.1) (2026-11-16)
+
+### Build System
+
+* **deps:** bump commander from 15.0.0 to 15.1.0 ([0b05d1c](https://github.com/ExaDev/semantic-release-workspace/commit/0b05d1c260c1c3b77a419a79291308d948d1899a))
+
 ## [3.4.0](https://github.com/ExaDev/semantic-release-workspace/compare/v3.3.4...v3.4.0) (2026-11-13)
 
 ### Features
