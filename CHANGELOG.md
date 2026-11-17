@@ -1,3 +1,9 @@
+## [3.4.3](https://github.com/ExaDev/semantic-release-workspace/compare/v3.4.2...v3.4.3) (2026-11-17)
+
+### Build System
+
+* **deps-dev:** bump typescript-eslint from 8.72.1 to 8.72.2 ([a5d92fc](https://github.com/ExaDev/semantic-release-workspace/commit/a5d92fc3a407b08ab1b0f368717ca5b7e22bc67a))
+
 ## [3.4.2](https://github.com/ExaDev/semantic-release-workspace/compare/v3.4.1...v3.4.2) (2026-11-16)
 
 ### Build System
