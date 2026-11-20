@@ -1,3 +1,9 @@
+## [3.4.5](https://github.com/ExaDev/semantic-release-workspace/compare/v3.4.4...v3.4.5) (2026-11-20)
+
+### Build System
+
+* **deps-dev:** bump @semantic-release/github from 12.0.10 to 12.0.11 ([cf38531](https://github.com/ExaDev/semantic-release-workspace/commit/cf385315c2a8929d92eb9b16a085f0125f590b1b))
+
 ## [3.4.4](https://github.com/ExaDev/semantic-release-workspace/compare/v3.4.3...v3.4.4) (2026-11-19)
 
 ### Build System
