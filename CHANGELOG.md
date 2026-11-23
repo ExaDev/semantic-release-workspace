@@ -1,3 +1,9 @@
+## [3.4.6](https://github.com/ExaDev/semantic-release-workspace/compare/v3.4.5...v3.4.6) (2026-11-23)
+
+### Build System
+
+* **deps-dev:** bump eslint from 10.14.0 to 10.15.0 ([257c555](https://github.com/ExaDev/semantic-release-workspace/commit/257c555869752f4d5eea37508462255544eec9be))
+
 ## [3.4.5](https://github.com/ExaDev/semantic-release-workspace/compare/v3.4.4...v3.4.5) (2026-11-20)
 
 ### Build System
