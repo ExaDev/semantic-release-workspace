@@ -1,3 +1,9 @@
+## [3.4.7](https://github.com/ExaDev/semantic-release-workspace/compare/v3.4.6...v3.4.7) (2026-11-23)
+
+### Build System
+
+* **deps-dev:** bump lint-staged from 17.6.0 to 17.6.1 ([b16d49f](https://github.com/ExaDev/semantic-release-workspace/commit/b16d49ffb1f2a323b1f22a5bab222e0dcbd58765))
+
 ## [3.4.6](https://github.com/ExaDev/semantic-release-workspace/compare/v3.4.5...v3.4.6) (2026-11-23)
 
 ### Build System
