@@ -1,3 +1,9 @@
+## [3.4.9](https://github.com/ExaDev/semantic-release-workspace/compare/v3.4.8...v3.4.9) (2026-11-25)
+
+### Build System
+
+* **deps-dev:** bump turbo from 2.11.11 to 2.11.12 ([2b6ec5d](https://github.com/ExaDev/semantic-release-workspace/commit/2b6ec5d0532c878b2d0a07c2d2b46db7f26cb5b6))
+
 ## [3.4.8](https://github.com/ExaDev/semantic-release-workspace/compare/v3.4.7...v3.4.8) (2026-11-24)
 
 ### Build System
